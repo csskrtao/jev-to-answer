@@ -1,0 +1,995 @@
+// 使用本地 SVG 图标，不依赖 CDN，避免首次打开时图标或框架加载失败。
+const paths = {
+  book: "M3 4h7a3 3 0 0 1 3 3v14a4 4 0 0 0-4-3H3z M21 4h-5a3 3 0 0 0-3 3v14a4 4 0 0 1 4-3h4z",
+  "book-open":
+    "M12 5c-3-2-6-2-9-1v15c3-1 6-1 9 1 3-2 6-2 9-1V4c-3-1-6-1-9 1v15",
+  sparkles:
+    "m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5z M20 2v4 M18 4h4",
+  history: "M3 11a9 9 0 1 1 2.6 7 M3 4v7h7 M12 7v5l3 2",
+  bookmark: "M6 3h12v18l-6-4-6 4z",
+  arrow: "M4 12h16 M14 6l6 6-6 6",
+  chevron: "m9 5 7 7-7 7",
+  settings:
+    "m9 3-1 3-3 1-2 3 2 3v3l3 2 3-1 3 1 3-2v-3l2-3-2-3-3-1-1-3z M15 11a3 3 0 1 1-6 0 3 3 0 0 1 6 0",
+  pen: "m15 4 5 5 M4 20l5-1L21 7a2 2 0 0 0-5-5L4 14z M4 14l5 5",
+  coffee:
+    "M4 8h12v8a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4z M16 9h2a3 3 0 0 1 0 6h-2 M7 2v3 M12 2v3 M2 23h18",
+  briefcase: "M3 7h18v14H3z M8 7V3h8v4 M3 12q9 6 18 0 M10 13h4v4h-4z",
+  heart: "M20 4a5 5 0 0 0-8 1 5 5 0 0 0-8-1C-2 10 7 17 12 21c5-4 14-11 8-17z",
+  sprout:
+    "M12 21V11 M12 16C3 17 2 11 2 8c8-1 10 5 10 8z M12 11c0-7 4-9 10-8 0 6-4 10-10 8z",
+  info: "M12 11v6 M12 7h.01 M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0",
+  lock: "M5 10h14v11H5z M8 10V6a4 4 0 0 1 8 0v4 M12 14v3",
+  lightbulb:
+    "M9 18v-1c0-3-4-3-4-8a7 7 0 0 1 14 0c0 5-4 5-4 8v1z M9 22h6 M12 11v7 M9 9l3 2 3-2",
+  refresh:
+    "M20 8a8 8 0 0 0-14-3L3 8 M3 3v5h5 M4 16a8 8 0 0 0 14 3l3-3 M16 16h5v5",
+  layers: "m12 3 10 5-10 5L2 8z M2 12l10 5 10-5 M2 16l10 5 10-5",
+  search: "M16 16l5 5 M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0",
+  close: "m6 6 12 12 M6 18 18 6",
+  check: "m5 12 4 4L19 6",
+  external: "M14 3h7v7 M21 3l-11 11 M10 3H3v18h18v-7",
+  copy: "M9 9h12v12H9z M5 15H3V3h12v2",
+  trash: "M3 6h18 M9 6V3h6v3 M5 6l1 15h12l1-15 M10 10v7 M14 10v7",
+};
+const icon = (name) =>
+  `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="${paths[name] || paths.sparkles}"/></svg>`;
+const $ = (selector) => document.querySelector(selector);
+const $$ = (selector) => [...document.querySelectorAll(selector)];
+// 所有模型输出、用户输入和历史记录在进入 HTML 前统一转义，避免脚本注入。
+const escapeHTML = (value) =>
+  String(value ?? "").replace(
+    /[&<>"']/g,
+    (char) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+        char
+      ],
+  );
+// 只允许最简单的加粗格式；先转义再格式化，模型无法插入可执行 HTML。
+const formatProse = (value) =>
+  escapeHTML(value).replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
+const categories = {
+  daily: "日常小事",
+  work: "工作学业",
+  relationship: "人际关系",
+  growth: "自我成长",
+};
+const categoryIcons = {
+  daily: "coffee",
+  work: "briefcase",
+  relationship: "heart",
+  growth: "sprout",
+};
+const promptSets = [
+  [
+    {
+      category: "daily",
+      text: "这个周末，出门探索还是宅家充电？",
+      question:
+        "忙碌了一周，有点疲惫，但也想换换心情。这个周末该出去走走，还是留在家好好休息？",
+    },
+    {
+      category: "work",
+      text: "新的机会，值得走出舒适区吗？",
+      question:
+        "我目前工作稳定，但成长比较慢。最近有一个更有挑战的新机会，我想学习新技能，也担心压力太大，该怎么选择？",
+    },
+    {
+      category: "relationship",
+      text: "好久没联系，要不要主动问候？",
+      question:
+        "有个很久没联系的朋友，最近突然想起一起度过的时光。我想主动问候，又怕有些唐突，要不要发条消息？",
+    },
+  ],
+  [
+    {
+      category: "growth",
+      text: "想养成习惯，先读书还是先运动？",
+      question:
+        "我想养成一个能长期坚持的习惯，每天只有半小时空闲，先从读书还是运动开始比较好？",
+    },
+    {
+      category: "daily",
+      text: "晚餐尝点新鲜，还是熟悉的老店？",
+      question:
+        "今天心情不错，想一个人吃顿好饭。是试试一直想去的新餐厅，还是去熟悉的老店？预算100元，不想排太久。",
+    },
+    {
+      category: "work",
+      text: "新技能，报课还是自己摸索？",
+      question:
+        "我想利用业余时间学一项新技能，每周有5小时，预算有限。应该先自己找资料学习，还是报一个系统课程？",
+    },
+  ],
+  [
+    {
+      category: "daily",
+      text: "假期旅行，提前规划还是随心出发？",
+      question:
+        "下个月有三天假，想去附近城市旅行放松。我既希望玩得尽兴，又不想行程太赶，该详细规划还是轻松随走？",
+    },
+    {
+      category: "relationship",
+      text: "周末聚会，要不要接受邀请？",
+      question:
+        "朋友邀请我参加周末聚会，但最近有些累，也想见见朋友。我该去参加一会儿，还是留时间给自己？",
+    },
+    {
+      category: "growth",
+      text: "想法很多，先迈出哪一小步？",
+      question:
+        "我想尝试写作、画画和拍照，但一直没开始。每周只有一个下午空闲，应该怎么选一个容易开始的方向？",
+    },
+  ],
+];
+const HISTORY_KEY = "answer-book:history:v1";
+const DRAFT_KEY = "answer-book:draft:v1";
+// 手机通过局域网 HTTP 访问时 randomUUID 可能不可用；记录 ID 不承担鉴权用途。
+const createRecordId = () =>
+  globalThis.crypto?.randomUUID?.() ||
+  `answer-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+const state = {
+  category: "daily",
+  view: "home",
+  busy: false,
+  followupBusy: false,
+  config: null,
+  settingsDraft: null,
+  promptIndex: 0,
+  current: null,
+  pending: null,
+  // 补充草稿按答案隔离；取消、重试或收藏重绘时，不丢失正在输入的信息。
+  supplementDrafts: new Map(),
+  supplementOpen: null,
+  controller: null,
+  records: [],
+  storageAvailable: true,
+};
+let toastTimer;
+
+function hydrateIcons(root = document) {
+  root.querySelectorAll("[data-icon]").forEach((element) => {
+    element.innerHTML = icon(element.dataset.icon);
+  });
+}
+function toast(message) {
+  clearTimeout(toastTimer);
+  $("#toast").textContent = message;
+  $("#toast").hidden = false;
+  toastTimer = setTimeout(() => {
+    $("#toast").hidden = true;
+  }, 4000);
+}
+function showError(selector, message) {
+  const element = $(selector);
+  element.textContent = message;
+  element.hidden = !message;
+}
+async function api(path, { body, signal, timeout = 125000 } = {}) {
+  const timeoutSignal = AbortSignal.timeout(timeout);
+  const response = await fetch(path, {
+    method: body === undefined ? "GET" : "POST",
+    headers: { "Content-Type": "application/json" },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    signal: signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal,
+  });
+  let data;
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error("服务暂时没有响应，请确认本地服务已启动。");
+  }
+  if (!response.ok || !data.ok)
+    throw new Error(data.error || "这次请求没有完成，请稍后重试。");
+  return data;
+}
+function readableError(error) {
+  if (error.name === "TimeoutError")
+    return "这次思考花的时间有点久，请稍后重试，或检查模型服务是否可用。";
+  if (error instanceof TypeError)
+    return "暂时连不上服务，请检查网络和本地服务是否正常运行。";
+  return String(error.message || "暂时没有得到答案，请重试。").slice(0, 500);
+}
+
+// 历史只保留在当前浏览器；读取时做基本结构检查，损坏的数据不会阻止页面启动。
+function restoreLocalData() {
+  try {
+    const records = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
+    if (Array.isArray(records))
+      state.records = records
+        .filter(
+          (record) =>
+            typeof record?.id === "string" &&
+            typeof record.question === "string" &&
+            Array.isArray(record.options?.choices) &&
+            record.options.choices.length >= 2 &&
+            record.options.choices.every(
+              (choice) =>
+                typeof choice?.id === "string" &&
+                typeof choice.title === "string" &&
+                typeof choice.description === "string",
+            ) &&
+            record.options.choices.some(
+              (choice) => choice.id === record.decision?.choiceId,
+            ) &&
+            record.decision.probabilities &&
+            typeof record.decision.probabilities === "object" &&
+            typeof record.decision.explanation === "string" &&
+            Number.isFinite(record.createdAt),
+        )
+        .slice(0, 100);
+    const draft = JSON.parse(localStorage.getItem(DRAFT_KEY) || "null");
+    if (typeof draft?.question === "string")
+      $("#question").value = draft.question.slice(0, 1000);
+    if (categories[draft?.category]) state.category = draft.category;
+  } catch {
+    state.storageAvailable = false;
+  }
+}
+function persistRecords() {
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(state.records));
+    state.storageAvailable = true;
+  } catch {
+    state.storageAvailable = false;
+    toast("浏览器存储暂不可用，当前答案仍可查看和复制。");
+  }
+  updateCounts();
+}
+function saveDraft() {
+  $("#character-count").textContent = $("#question").value.length;
+  try {
+    localStorage.setItem(
+      DRAFT_KEY,
+      JSON.stringify({
+        question: $("#question").value,
+        category: state.category,
+      }),
+    );
+  } catch {
+    /* 隐私模式禁用存储时，仍允许正常提问。 */
+  }
+}
+function updateCounts() {
+  $("#history-count").textContent = state.records.length;
+  $("#favorite-count").textContent = state.records.filter(
+    (record) => record.favorite,
+  ).length;
+}
+function selectCategory(category) {
+  if (state.busy) return;
+  state.category = category;
+  $$("[data-category]").forEach((button) => {
+    const active = button.dataset.category === category;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  saveDraft();
+}
+function renderPrompts() {
+  $("#prompt-grid").innerHTML = promptSets[state.promptIndex]
+    .map(
+      (prompt, index) =>
+        `<button class="prompt-card" data-prompt="${index}" type="button"><span class="prompt-label">${icon(categoryIcons[prompt.category])}${categories[prompt.category]}</span><p>${escapeHTML(prompt.text)}</p><span class="prompt-arrow">${icon("arrow")}</span></button>`,
+    )
+    .join("");
+  if (state.busy)
+    $$(".prompt-card").forEach((button) => {
+      button.disabled = true;
+    });
+}
+function setView(view) {
+  state.view = ["home", "history", "favorites"].includes(view) ? view : "home";
+  $("#home-view").hidden = state.view !== "home";
+  $("#library-view").hidden = state.view === "home";
+  const label = {
+    home: "翻开答案",
+    history: "我的答案",
+    favorites: "收藏的启示",
+  }[state.view];
+  $("#breadcrumb-label").textContent = label;
+  $$("[data-view]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.view === state.view);
+    if (button.dataset.view === state.view)
+      button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
+  });
+  if (state.view !== "home") renderHistory();
+  window.scrollTo({ top: 0, behavior: "instant" });
+}
+function setBusy(busy) {
+  state.busy = busy;
+  $("#question").disabled = busy;
+  $("#ask-button").disabled = busy;
+  $("#ask-button").innerHTML = busy
+    ? '<span class="spinner"></span><span>正在寻找答案</span>'
+    : `${icon("sparkles")}<span>翻开我的答案</span>${icon("arrow")}`;
+  $$("[data-category],.prompt-card,#shuffle-prompts").forEach((button) => {
+    button.disabled = busy;
+  });
+  $$("[data-action='supplement'],#supplement-input,#supplement-send,[data-action='close-supplement'],#followup-input,#followup-send,[data-followup],[data-action='favorite-current']").forEach((control) => {
+    control.disabled = busy;
+  });
+  if ($("#supplement-form")) $("#supplement-form").setAttribute("aria-busy", String(busy));
+  $("#question-form").setAttribute("aria-busy", String(busy));
+}
+function renderJourney(phase, options, error) {
+  const element = $("#journey");
+  const failed = phase === "error";
+  element.hidden = false;
+  element.innerHTML = `<div class="journey-top">${failed ? icon("info") : '<span class="spinner"></span>'}<div><h3>${failed ? "答案还差最后一步" : phase === "options" ? "把纠结，整理成几种可能…" : "选项准备好了，Jev 正在认真权衡…"}</h3><p>${failed ? escapeHTML(error) : phase === "options" ? "AI 正在阅读你的问题，寻找值得尝试的方向。" : "接下来为你选出一个方向，并生成简短解读。"}</p></div></div>${options ? `<ul class="journey-options">${options.choices.map((choice, index) => `<li><small>${String.fromCharCode(65 + index)}</small>${escapeHTML(choice.title)}</li>`).join("")}</ul>` : ""}<div class="journey-actions">${failed ? '<button class="secondary-button" data-action="retry">' + icon("refresh") + '重试这一步</button><button class="text-button" data-action="settings">检查模型设置</button>' : '<button class="text-button" data-action="cancel">取消等待</button>'}</div>`;
+}
+async function askQuestion(event) {
+  event?.preventDefault();
+  if (state.busy) return;
+  const question = $("#question").value.trim();
+  if (!question) {
+    showError("#form-error", "先写下一个问题，让答案之书为你翻开。");
+    $("#question").focus();
+    return;
+  }
+  if (question.length > 1000) {
+    showError("#form-error", "问题最多 1000 字，请精简后重试。");
+    return;
+  }
+  showError("#form-error", "");
+  if (state.config && !isConfigured(state.config)) {
+    showError("#form-error", "先连接大模型和 Jev，就可以翻开你的答案。");
+    openSettings();
+    return;
+  }
+  state.pending = { question, category: state.category, supplements: [], options: null };
+  state.current = null;
+  $("#result").hidden = true;
+  await runJourney();
+}
+async function runJourney() {
+  const pending = state.pending;
+  if (!pending || state.busy) return;
+  setBusy(true);
+  const controller = new AbortController();
+  state.controller = controller;
+  try {
+    if (!pending.options) {
+      renderJourney("options");
+      $("#journey").scrollIntoView({ behavior: "smooth", block: "nearest" });
+      const data = await api("/api/book/options", {
+        body: {
+          question: pending.question,
+          category: categories[pending.category],
+          supplements: pending.supplements || [],
+        },
+        signal: controller.signal,
+      });
+      pending.options = data.options;
+    }
+    renderJourney("decide", pending.options);
+    const { decision } = await api("/api/book/decide", {
+      body: { question: pending.question, supplements: pending.supplements || [], options: pending.options },
+      signal: controller.signal,
+    });
+    if (controller.signal.aborted) return;
+    const record = {
+      id: createRecordId(),
+      createdAt: Date.now(),
+      question: pending.question,
+      category: pending.category,
+      options: pending.options,
+      decision,
+      favorite: false,
+      ...(pending.parentId ? { parentId: pending.parentId } : {}),
+    };
+    // 新判断另存一条历史，旧答案和旧追问仍可回看，避免把两次判断混在一起。
+    if (pending.parentId) state.supplementDrafts.delete(pending.parentId);
+    state.supplementOpen = null;
+    state.current = record;
+    state.records.unshift(record);
+    state.records = state.records.slice(0, 100);
+    persistRecords();
+    state.pending = null;
+    $("#journey").hidden = true;
+    renderResult(record);
+    if (state.view === "home")
+      $("#result").scrollIntoView({ behavior: "smooth", block: "start" });
+    else {
+      renderHistory();
+      toast("你的新答案已准备好，已收录到「我的答案」。");
+    }
+  } catch (error) {
+    if (controller.signal.aborted) {
+      $("#journey").hidden = true;
+      toast(pending.parentId ? "已取消重新选择，原答案和补充内容已保留。" : "已取消等待，可以修改问题再试一次。");
+    } else renderJourney("error", pending.options, readableError(error));
+  } finally {
+    setBusy(false);
+    state.controller = null;
+  }
+}
+// 将补充绑定到生成它的选项，读历史、复制和继续追问时使用同一份上下文。
+function recordSupplements(record) {
+  return Array.isArray(record?.options?.supplements)
+    ? record.options.supplements.filter((item) => typeof item === "string").slice(0, 5)
+    : [];
+}
+
+function renderSupplement(record) {
+  const supplements = recordSupplements(record);
+  if (supplements.length) {
+    $(".answer-top").insertAdjacentHTML("beforeend", `<details class="supplement-context"><summary>本次已结合 ${supplements.length} 条补充信息</summary><ol>${supplements.map((item) => `<li>${escapeHTML(item)}</li>`).join("")}</ol></details>`);
+  }
+  const expanded = state.supplementOpen === record.id;
+  $(".answer-actions [data-action='new']").insertAdjacentHTML("beforebegin", `<button type="button" class="secondary-button supplement-button" data-action="supplement" aria-controls="supplement-panel" aria-expanded="${expanded}">${icon("pen")}我要补充信息</button>`);
+  $("#result").insertAdjacentHTML("beforeend", `<section id="supplement-panel" class="supplement-panel" aria-labelledby="supplement-heading" ${expanded ? "" : "hidden"}><div class="section-heading"><h2 id="supplement-heading">让这次选择，更贴近你的情况</h2><button type="button" class="icon-button" data-action="close-supplement" aria-label="收起补充信息">${icon("close")}</button></div><p class="supplement-intro">补充预算、时间、顾虑或新的条件。我们会连同原问题${supplements.length ? "和之前的补充" : ""}重新整理选项、做出选择，原答案保留在历史中。</p><form id="supplement-form"><label class="sr-only" for="supplement-input">补充信息</label><textarea id="supplement-input" rows="4" maxlength="1000" placeholder="比如：我只有周六下午有空，预算不超过 100 元，希望尽量少走路…" aria-describedby="supplement-hint"></textarea><div class="supplement-form-bottom"><span id="supplement-hint">第 ${supplements.length + 1} 次补充 · 每次最多 1000 字，最多 5 次</span><button type="submit" class="primary-button" id="supplement-send">结合补充重新选择${icon("arrow")}</button></div></form><div id="supplement-error" class="form-error" role="alert" hidden></div></section>`);
+  $("#supplement-input").value = state.supplementDrafts.get(record.id) || "";
+}
+
+function openSupplement() {
+  if (state.busy || !state.current) return;
+  if (recordSupplements(state.current).length >= 5) {
+    toast("这条问题已补充 5 次，可以整理已有信息后再问一题。");
+    return;
+  }
+  state.supplementOpen = state.current.id;
+  $("#supplement-panel").hidden = false;
+  $("[data-action='supplement']").setAttribute("aria-expanded", "true");
+  $("#supplement-panel").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  $("#supplement-input").focus({ preventScroll: true });
+}
+
+async function askSupplement(event) {
+  event?.preventDefault();
+  if (state.busy || !state.current) return;
+  const input = $("#supplement-input");
+  const supplement = input.value.trim();
+  const previous = recordSupplements(state.current);
+  if (!supplement || supplement.length > 1000 || previous.length >= 5) {
+    showError("#supplement-error", previous.length >= 5 ? "已补充 5 次，请整理已有信息后再问一题。" : "请填写补充信息，每次最多 1000 字。");
+    input.focus();
+    return;
+  }
+  if (state.config && !isConfigured(state.config)) {
+    showError("#supplement-error", "先连接大模型和 Jev，就可以结合补充重新选择。");
+    openSettings();
+    return;
+  }
+  showError("#supplement-error", "");
+  state.supplementDrafts.set(state.current.id, input.value);
+  // 无论原问题输入框是否被改动，补充始终作用于当前正在阅读的答案。
+  state.pending = {
+    question: state.current.question,
+    category: state.current.category,
+    supplements: [...previous, supplement],
+    parentId: state.current.id,
+    options: null,
+  };
+  await runJourney();
+}
+
+function renderResult(record) {
+  const { options, decision } = record;
+  const chosen = options.choices.find(
+    (choice) => choice.id === decision.choiceId,
+  );
+  const hasProbabilities = options.choices.every(
+    (choice) =>
+      Number.isFinite(decision.probabilities?.[choice.id]) &&
+      decision.probabilities[choice.id] >= 0 &&
+      decision.probabilities[choice.id] <= 1,
+  );
+  $("#result").hidden = false;
+  $("#result").innerHTML =
+    `<article class="answer-card"><div class="answer-top"><div class="answer-meta"><span>02 / YOUR NEXT CHAPTER</span><span class="answer-badge">${icon("sparkles")}Jev 的选择</span></div><h2>${escapeHTML(chosen.title)}</h2><p class="answer-question">关于「${escapeHTML(record.question)}」</p></div><div class="answer-content"><p class="answer-explanation">${escapeHTML(decision.explanation)}</p><div class="choice-list">${options.choices
+      .map((choice, index) => {
+        const selected = choice.id === decision.choiceId;
+        const percent = hasProbabilities
+          ? Math.round(decision.probabilities[choice.id] * 1000) / 10
+          : null;
+        return `<div class="choice-row ${selected ? "chosen" : ""}"><div class="choice-title"><span class="choice-letter">${String.fromCharCode(65 + index)}</span><b>${escapeHTML(choice.title)}</b>${selected ? icon("check") : ""}${hasProbabilities ? `<span class="choice-percent">${percent}%</span>` : ""}</div><p class="choice-description">${escapeHTML(choice.description)}</p>${hasProbabilities ? `<div class="probability-track" aria-hidden="true"><div class="probability-fill" style="width:${percent}%"></div></div>` : ""}</div>`;
+      })
+      .join(
+        "",
+      )}</div><p class="probability-note">${hasProbabilities ? "百分比表示模型在这些选项中的倾向，不代表事情发生的概率。" : "本次服务未提供概率分布，已保留 Jev 返回的选择。"}${decision.explanationUnavailable ? " 本次解读暂不可用。" : ""}</p><div class="answer-actions"><button class="secondary-button ${record.favorite ? "is-saved" : ""}" data-action="favorite-current" aria-pressed="${!!record.favorite}">${icon("bookmark")}${record.favorite ? "已收藏" : "收藏启示"}</button><button class="secondary-button" data-action="copy">${icon("copy")}复制答案</button><button class="secondary-button" data-action="new">再问一题${icon("arrow")}</button></div></div></article>`;
+  renderSupplement(record);
+  $("#result").insertAdjacentHTML(
+    "beforeend",
+    `<section class="followup-panel" aria-labelledby="followup-heading"><div class="section-heading"><div><span class="section-kicker">03 / GO A LITTLE DEEPER</span><h2 id="followup-heading">一个答案，也可以是对话的开始</h2></div><span class="followup-symbol">✧</span></div><p class="followup-intro">为什么这样选，下一步怎么做？带着刚才的答案，我们继续聊。</p><div id="followup-messages" class="followup-messages" aria-live="polite"></div><div class="followup-suggestions"><button type="button" data-followup="为什么更推荐这个选择？有哪些需要留意的地方？">为什么这样选？</button><button type="button" data-followup="如果决定这样做，我可以从哪些具体的小步骤开始？">具体该怎么开始？</button><button type="button" data-followup="从另一个角度看，还有什么可能被忽略的因素？">换个角度想一想</button></div><form id="followup-form"><label class="sr-only" for="followup-input">继续追问</label><textarea id="followup-input" rows="2" maxlength="1000" placeholder="继续追问，或补充一点新的想法…"></textarea><div class="followup-form-bottom"><span>会参考原问题与最近 6 轮对话</span><button type="submit" class="primary-button" id="followup-send">继续追问${icon("arrow")}</button></div></form><div id="followup-error" class="form-error" role="alert" hidden></div></section>`,
+  );
+  renderFollowups(record);
+}
+
+function validFollowups(record) {
+  return Array.isArray(record.followups)
+    ? record.followups
+        .filter(
+          (message) =>
+            typeof message?.question === "string" &&
+            typeof message.answer === "string",
+        )
+        .slice(-20)
+    : [];
+}
+function renderFollowups(record, pendingQuestion) {
+  const container = $("#followup-messages");
+  if (!container) return;
+  container.innerHTML = validFollowups(record)
+    .map(
+      (message, index) =>
+        `<div class="followup-turn"><div class="chat-question"><span>你的追问 · ${index + 1}</span><p>${escapeHTML(message.question)}</p></div><div class="chat-answer"><span>${icon("sparkles")}答案之书 · AI 解读</span><p>${formatProse(message.answer)}</p></div></div>`,
+    )
+    .join("");
+  if (pendingQuestion)
+    container.insertAdjacentHTML(
+      "beforeend",
+      `<div class="followup-turn"><div class="chat-question"><span>你的追问</span><p>${escapeHTML(pendingQuestion)}</p></div><div class="chat-answer chat-thinking"><span class="spinner"></span>正在结合前面的对话思考…<button type="button" class="text-button" data-action="cancel">取消</button></div></div>`,
+    );
+}
+async function askFollowup(event) {
+  event?.preventDefault();
+  if (state.busy || !state.current) return;
+  const input = $("#followup-input");
+  const followUp = input.value.trim();
+  if (!followUp) {
+    showError("#followup-error", "写下想深入了解的内容，我们接着聊。");
+    input.focus();
+    return;
+  }
+  if (followUp.length > 1000) {
+    showError("#followup-error", "追问最多 1000 字，请精简后重试。");
+    return;
+  }
+  const record = state.current;
+  const controller = new AbortController();
+  state.controller = controller;
+  state.followupBusy = true;
+  setBusy(true);
+  showError("#followup-error", "");
+  input.disabled = true;
+  $("#followup-send").disabled = true;
+  $$("[data-followup]").forEach((button) => {
+    button.disabled = true;
+  });
+  renderFollowups(record, followUp);
+  $("#followup-form").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  try {
+    // 最近六轮用于模型上下文，完整可见对话保留最近二十轮并随答案存储。
+    const { answer } = await api("/api/book/follow-up", {
+      body: {
+        question: record.question,
+        supplements: recordSupplements(record),
+        options: record.options,
+        decision: record.decision,
+        messages: validFollowups(record).slice(-6),
+        followUp,
+      },
+      signal: controller.signal,
+      timeout: 75000,
+    });
+    if (controller.signal.aborted) return;
+    record.followups = [
+      ...validFollowups(record),
+      { question: followUp, answer },
+    ].slice(-20);
+    persistRecords();
+    renderFollowups(record);
+    input.value = "";
+    if (state.view !== "home") {
+      renderHistory();
+      toast("追问解读已完成，已保存到这条答案。");
+    }
+  } catch (error) {
+    renderFollowups(record);
+    if (controller.signal.aborted) toast("已取消等待，追问内容已保留。");
+    else
+      showError(
+        "#followup-error",
+        `${readableError(error)} 追问内容已保留，可以重新发送。`,
+      );
+  } finally {
+    state.followupBusy = false;
+    state.controller = null;
+    setBusy(false);
+    input.disabled = false;
+    $("#followup-send").disabled = false;
+    $$("[data-followup]").forEach((button) => {
+      button.disabled = false;
+    });
+  }
+}
+function toggleFavorite(id) {
+  if (state.busy) {
+    toast("当前思考完成后就可以收藏这条答案。");
+    return;
+  }
+  const record = state.records.find((item) => item.id === id);
+  if (!record) return;
+  record.favorite = !record.favorite;
+  persistRecords();
+  if (state.current?.id === id) {
+    state.current = record;
+    renderResult(record);
+  }
+  if (state.view !== "home") renderHistory();
+  toast(
+    record.favorite
+      ? "这一页启示，已为你收藏。"
+      : "已取消收藏，答案仍在历史中。",
+  );
+}
+function renderHistory() {
+  const favorites = state.view === "favorites";
+  $("#library-title").textContent = favorites ? "收藏的启示" : "我的答案";
+  $("#library-description").textContent = favorites
+    ? "有些答案，值得在需要时再读一遍。"
+    : "把走过的犹豫，留成下一次的勇气。";
+  const search = $("#history-search").value.trim().toLocaleLowerCase();
+  const records = state.records.filter(
+    (record) =>
+      (!favorites || record.favorite) &&
+      `${record.question} ${recordSupplements(record).join(" ")} ${record.options.choices.map((choice) => choice.title).join(" ")} ${record.decision.explanation}`
+        .toLocaleLowerCase()
+        .includes(search),
+  );
+  $("#history-list").innerHTML = records.length
+    ? records
+        .map((record) => {
+          const chosen = record.options.choices.find(
+            (choice) => choice.id === record.decision.choiceId,
+          );
+          return `<article class="history-card"><div class="history-meta"><span>${escapeHTML(categories[record.category] || "日常小事")}${recordSupplements(record).length ? ` · 补充 ${recordSupplements(record).length} 次` : ""}</span><time datetime="${new Date(record.createdAt).toISOString()}">${new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(record.createdAt)}</time></div><h3>${escapeHTML(record.question)}</h3><div class="history-answer">${icon("sparkles")}${escapeHTML(chosen.title)}</div><div class="history-actions"><button class="text-button delete-record" data-delete="${escapeHTML(record.id)}" aria-label="删除这条答案">${icon("trash")}</button><button class="secondary-button ${record.favorite ? "is-saved" : ""}" data-favorite="${escapeHTML(record.id)}" aria-label="${record.favorite ? "取消收藏" : "收藏这条答案"}" aria-pressed="${!!record.favorite}">${icon("bookmark")}</button><button class="secondary-button" data-record="${escapeHTML(record.id)}">重读这一页${icon("arrow")}</button></div></article>`;
+        })
+        .join("")
+    : `<div class="empty-state"><span>${icon(search ? "search" : favorites ? "bookmark" : "book-open")}</span><h3>${search ? "还没找到这一页" : favorites ? "为触动你的答案，折一个角" : "你的故事，从第一个问题开始"}</h3><p>${search ? "试试其他关键词，或清空搜索。" : favorites ? "在答案下点击「收藏启示」，就能在这里重温。" : "写下此刻的困惑，答案会被收录在这里。"}</p>${search ? '<button class="secondary-button" data-action="clear-search">清空搜索</button>' : '<button class="primary-button" data-view="home">翻开第一个答案' + icon("arrow") + "</button>"}</div>`;
+  $("#history-list").insertAdjacentHTML(
+    "beforeend",
+    `<p class="storage-note">${state.storageAvailable ? "最多保存最近 100 条答案，仅保存在当前浏览器。" : "浏览器存储不可用，本次记录仅在当前页面保留。"}</p>`,
+  );
+}
+function newQuestion() {
+  if (state.busy) {
+    toast("请先等待当前问题完成，或取消等待。");
+    return;
+  }
+  state.current = null;
+  state.pending = null;
+  state.supplementOpen = null;
+  $("#result").hidden = true;
+  $("#journey").hidden = true;
+  $("#question").value = "";
+  saveDraft();
+  showError("#form-error", "");
+  setView("home");
+  $("#question").focus();
+}
+async function copyAnswer() {
+  const record = state.current;
+  if (!record) return;
+  const choice = record.options.choices.find(
+    (item) => item.id === record.decision.choiceId,
+  );
+  const conversation = validFollowups(record)
+    .map(
+      (message) => `\n\n追问：${message.question}\nAI 解读：${message.answer}`,
+    )
+    .join("");
+  const supplements = recordSupplements(record).map((item, index) => `\n\n补充 ${index + 1}：${item}`).join("");
+  const text = `答案之书 · 遇事不决，Jev 解决\n\n我的问题：${record.question}${supplements}\n\nJev 的选择：${choice.title}\n${choice.description}\n\n${record.decision.explanation}${conversation}\n\n答案是启发，选择始终在你。`;
+  try {
+    await navigator.clipboard.writeText(text);
+    toast("答案已复制，带着它迈出下一步。");
+  } catch {
+    // 普通局域网 HTTP 可能没有 Clipboard API，使用传统选区复制降级。
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.style.cssText = "position:fixed;top:0;left:-9999px";
+    document.body.append(textarea);
+    textarea.select();
+    let copied = false;
+    try {
+      copied = document.execCommand("copy");
+    } catch {
+      /* 保留页面可选中的答案作为最后降级。 */
+    }
+    textarea.remove();
+    toast(
+      copied ? "答案已复制。" : "浏览器不支持自动复制，请长按答案文字复制。",
+    );
+  }
+}
+
+// 设置只接收服务端脱敏信息；密钥留空不会覆盖已经保存的密钥。
+function isConfigured(config) {
+  return !!(
+    config?.llm?.baseURL &&
+    config.llm.model &&
+    config.jev?.[config.jev.provider]?.apiKeyConfigured
+  );
+}
+function updateConnection() {
+  const configured = isConfigured(state.config);
+  $("#connection").classList.toggle("unconfigured", !configured);
+  $("#connection-label").textContent = configured ? "模型已配置" : "连接模型";
+}
+const defaultConfig = {
+  llm: { name: "custom", baseURL: "", model: "", apiKeyConfigured: false },
+  jev: {
+    provider: "typesafe",
+    typesafe: {
+      baseURL: "https://api.typesafe.ai/v1",
+      model: "jev-latest",
+      apiKeyConfigured: false,
+    },
+    vercel: {
+      baseURL: "https://ai-gateway.vercel.sh/v4/ai",
+      model: "typesafe-ai/jev",
+      apiKeyConfigured: false,
+    },
+  },
+};
+async function loadConfig() {
+  try {
+    const { config } = await api("/api/config", { timeout: 10000 });
+    state.config = config;
+  } catch {
+    $("#connection-label").textContent = "服务未连接";
+    $("#connection").classList.add("unconfigured");
+    return;
+  }
+  updateConnection();
+}
+function openSettings() {
+  if (state.busy) {
+    toast("请先等待当前问题完成，或取消等待后修改设置。");
+    return;
+  }
+  state.settingsDraft = structuredClone(state.config || defaultConfig);
+  $("#llm-url").value = state.settingsDraft.llm.baseURL || "";
+  $("#llm-model").value = state.settingsDraft.llm.model || "";
+  $("#llm-key").value = "";
+  $("#llm-key").placeholder = state.settingsDraft.llm.apiKeyConfigured
+    ? "已配置 · 留空保留原密钥"
+    : "输入 API Key（本地服务可留空）";
+  $("#jev-provider").value = state.settingsDraft.jev.provider;
+  fillJevFields();
+  showError("#settings-error", "");
+  $("#settings-dialog").showModal();
+}
+function captureJevFields() {
+  const provider = state.settingsDraft.jev.provider;
+  state.settingsDraft.jev[provider] = {
+    ...state.settingsDraft.jev[provider],
+    baseURL: $("#jev-url").value.trim(),
+    model: $("#jev-model").value.trim(),
+    apiKey: $("#jev-key").value.trim(),
+  };
+}
+function fillJevFields() {
+  const config = state.settingsDraft.jev[state.settingsDraft.jev.provider];
+  $("#jev-url").value = config.baseURL || "";
+  $("#jev-model").value = config.model || "";
+  $("#jev-key").value = config.apiKey || "";
+  $("#jev-key").placeholder = config.apiKeyConfigured
+    ? "已配置 · 留空保留原密钥"
+    : "输入 Jev API Key";
+}
+async function saveSettings(event) {
+  event.preventDefault();
+  captureJevFields();
+  const button = $("#save-settings");
+  button.disabled = true;
+  showError("#settings-error", "");
+  const config = state.settingsDraft;
+  config.llm = {
+    ...config.llm,
+    baseURL: $("#llm-url").value.trim(),
+    model: $("#llm-model").value.trim(),
+    apiKey: $("#llm-key").value.trim(),
+  };
+  try {
+    if (
+      !config.jev[config.jev.provider].apiKey &&
+      !config.jev[config.jev.provider].apiKeyConfigured
+    )
+      throw new Error("请填写当前 Jev 接入方式的 API Key。");
+    state.config = (
+      await api("/api/config", { body: config, timeout: 15000 })
+    ).config;
+    updateConnection();
+    $("#settings-dialog").close();
+    toast("设置已保存，可以翻开你的答案了。");
+    showError("#form-error", "");
+  } catch (error) {
+    showError("#settings-error", readableError(error));
+  } finally {
+    button.disabled = false;
+  }
+}
+async function fetchModels() {
+  const button = $("#fetch-models");
+  button.disabled = true;
+  button.textContent = "读取中…";
+  showError("#settings-error", "");
+  try {
+    const llm = { baseURL: $("#llm-url").value.trim() };
+    if ($("#llm-key").value.trim()) llm.apiKey = $("#llm-key").value.trim();
+    const { models } = await api("/api/models", {
+      body: { llm },
+      timeout: 20000,
+    });
+    $("#model-list").innerHTML = models
+      .map((model) => `<option value="${escapeHTML(model)}"></option>`)
+      .join("");
+    if (!$("#llm-model").value && models.length)
+      $("#llm-model").value = models[0];
+    toast(
+      models.length
+        ? `已读取 ${models.length} 个模型，点击模型名称选择。`
+        : "服务未返回模型列表，可以手动填写模型名称。",
+    );
+  } catch (error) {
+    showError("#settings-error", readableError(error));
+  } finally {
+    button.disabled = false;
+    button.textContent = "获取模型";
+  }
+}
+
+// 事件委托覆盖动态结果和历史卡片，不重复绑定监听器。
+document.addEventListener("click", (event) => {
+  const button = event.target.closest("button");
+  if (!button || button.disabled) return;
+  if (button.dataset.view) {
+    $("#history-search").value = "";
+    setView(button.dataset.view);
+  }
+  if (button.dataset.category) selectCategory(button.dataset.category);
+  if (button.dataset.prompt !== undefined) {
+    const prompt = promptSets[state.promptIndex][Number(button.dataset.prompt)];
+    selectCategory(prompt.category);
+    $("#question").value = prompt.question;
+    saveDraft();
+    $("#question").focus();
+    showError("#form-error", "");
+  }
+  if (button.dataset.favorite) toggleFavorite(button.dataset.favorite);
+  if (button.dataset.followup) {
+    $("#followup-input").value = button.dataset.followup;
+    $("#followup-input").focus();
+  }
+  if (button.dataset.action === "supplement") openSupplement();
+  if (button.dataset.action === "close-supplement") {
+    state.supplementOpen = null;
+    $("#supplement-panel").hidden = true;
+    $("[data-action='supplement']")?.setAttribute("aria-expanded", "false");
+  }
+  if (button.dataset.record) {
+    if (state.busy) {
+      toast("请先等待当前问题完成。");
+      return;
+    }
+    const record = state.records.find(
+      (item) => item.id === button.dataset.record,
+    );
+    if (record) {
+      state.current = record;
+      state.pending = null;
+      setView("home");
+      $("#question").value = record.question;
+      selectCategory(record.category);
+      $("#journey").hidden = true;
+      renderResult(record);
+      $("#result").scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }
+  if (button.dataset.delete) {
+    if (state.busy) {
+      toast("请先等待当前对话完成，再整理历史记录。");
+      return;
+    }
+    if (button.dataset.confirm !== "true") {
+      button.dataset.confirm = "true";
+      button.textContent = "确定删除这一条？";
+      setTimeout(() => {
+        if (button.isConnected) {
+          button.dataset.confirm = "false";
+          button.innerHTML = icon("trash");
+        }
+      }, 4000);
+      return;
+    }
+    state.records = state.records.filter(
+      (record) => record.id !== button.dataset.delete,
+    );
+    if (state.current?.id === button.dataset.delete) {
+      state.current = null;
+      $("#result").hidden = true;
+    }
+    persistRecords();
+    renderHistory();
+    toast("已删除这一条答案。");
+  }
+  const action = button.dataset.action;
+  if (action === "settings") openSettings();
+  if (action === "cancel") state.controller?.abort();
+  if (action === "retry") {
+    if (state.pending?.parentId) {
+      // 编辑补充后必须重新生成选项；原样重试则继续失败的阶段。
+      const latest = state.pending.supplements.at(-1);
+      if ($("#supplement-input")?.value.trim() !== latest) askSupplement();
+      else runJourney();
+      return;
+    }
+    // 用户编辑问题后重新开始；未编辑则复用已生成选项，避免重复请求大模型。
+    if (
+      $("#question").value.trim() !== state.pending?.question ||
+      state.category !== state.pending?.category
+    )
+      askQuestion();
+    else runJourney();
+  }
+  if (action === "favorite-current" && state.current)
+    toggleFavorite(state.current.id);
+  if (action === "copy") copyAnswer();
+  if (action === "new") newQuestion();
+  if (action === "clear-search") {
+    $("#history-search").value = "";
+    renderHistory();
+  }
+});
+$(".brand").addEventListener("click", (event) => {
+  event.preventDefault();
+  setView("home");
+});
+$("#question-form").addEventListener("submit", askQuestion);
+document.addEventListener("submit", (event) => {
+  if (event.target.id === "followup-form") askFollowup(event);
+  if (event.target.id === "supplement-form") askSupplement(event);
+});
+document.addEventListener("input", (event) => {
+  if (event.target.id === "supplement-input" && state.current) {
+    state.supplementDrafts.set(state.current.id, event.target.value);
+  }
+});
+document.addEventListener("keydown", (event) => {
+  if (event.target.id === "supplement-input" && (event.ctrlKey || event.metaKey) && event.key === "Enter") {
+    askSupplement(event);
+    return;
+  }
+  if (
+    event.target.id === "followup-input" &&
+    (event.ctrlKey || event.metaKey) &&
+    event.key === "Enter"
+  )
+    askFollowup(event);
+});
+$("#question").addEventListener("input", saveDraft);
+$("#question").addEventListener("keydown", (event) => {
+  if ((event.ctrlKey || event.metaKey) && event.key === "Enter")
+    askQuestion(event);
+});
+$("#shuffle-prompts").addEventListener("click", () => {
+  state.promptIndex = (state.promptIndex + 1) % promptSets.length;
+  renderPrompts();
+});
+$("#history-search").addEventListener("input", renderHistory);
+$("#settings-form").addEventListener("submit", saveSettings);
+$("#close-settings").addEventListener("click", () =>
+  $("#settings-dialog").close(),
+);
+$("#settings-dialog").addEventListener("close", () => {
+  $("#llm-key").value = "";
+  $("#jev-key").value = "";
+  state.settingsDraft = null;
+});
+$("#jev-provider").addEventListener("change", () => {
+  captureJevFields();
+  state.settingsDraft.jev.provider = $("#jev-provider").value;
+  fillJevFields();
+});
+$("#fetch-models").addEventListener("click", fetchModels);
+hydrateIcons();
+restoreLocalData();
+selectCategory(state.category);
+updateCounts();
+renderPrompts();
+setView("home");
+loadConfig();

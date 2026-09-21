@@ -1,0 +1,19 @@
+{
+  "name": "answer-book",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "答案之书 · 遇事不决，Jev 解决。大模型整理选项，Jev 给出方向。",
+  "scripts": {
+    "dev": "node --watch server.mjs",
+    "start": "node server.mjs",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@ai-sdk/gateway": "^4.0.87",
+    "@ai-sdk/openai-compatible": "^3.0.53",
+    "ai": "^7.0.107",
+    "h3": "^2.0.1-rc.32",
+    "zod": "^3.25.76"
+  }
+}

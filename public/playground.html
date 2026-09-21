@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Jev 调试广场 · AI Gateway</title>
+  <style>
+    [v-cloak] { display: none; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f5f7fa; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; }
+    .page-header {
+      background: #0a0a23; color: #fff; padding: 14px 24px;
+      display: flex; align-items: center; gap: 12px;
+    }
+    .page-header h1 { font-size: 18px; margin: 0; font-weight: 600; }
+    .page-header .sub { font-size: 12px; opacity: .7; margin-top: 2px; }
+    .page-header .logo { font-size: 26px; }
+    .main { max-width: 1400px; margin: 16px auto; padding: 0 16px 40px; }
+    .card { margin-bottom: 16px; }
+    .card-title { font-weight: 600; display: flex; align-items: center; gap: 8px; }
+    .card-title .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+    .dot-llm { background: #409eff; }
+    .dot-jev { background: #f56c6c; }
+    .dot-param { background: #67c23a; }
+    .dot-result { background: #e6a23c; }
+    .field-row { margin-bottom: 12px; }
+    .field-label { font-size: 12px; color: #909399; margin-bottom: 4px; }
+    .params-editor { font-family: "Cascadia Code", Consolas, monospace; font-size: 13px; line-height: 1.5; }
+    .need-box { min-height: 110px; }
+    .ans-card { margin-bottom: 12px; }
+    .ans-card .el-card__header { padding: 10px 16px; }
+    .ans-id { font-weight: 600; margin-right: 8px; }
+    .prob-row { display: flex; align-items: center; gap: 10px; margin: 6px 0; }
+    .prob-row .prob-label { width: 160px; font-size: 12px; color: #606266; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .prob-row .el-progress { flex: 1; }
+    .prob-row .prob-val { width: 44px; font-size: 12px; color: #909399; }
+    .verdict { margin-top: 8px; font-size: 14px; }
+    .verdict b { color: #409eff; }
+    .result-json { max-height: 320px; overflow: auto; background: #1e1e2e; color: #d4d4d4; padding: 12px; border-radius: 6px; font-family: "Cascadia Code", Consolas, monospace; font-size: 12.5px; white-space: pre; }
+    .explain-body { line-height: 1.75; font-size: 14px; color: #303133; }
+    .explain-body pre { background: #f6f8fa; padding: 10px; border-radius: 6px; overflow: auto; }
+    .explain-body code { background: #f6f8fa; padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+    .explain-body table { border-collapse: collapse; }
+    .explain-body th, .explain-body td { border: 1px solid #dcdfe6; padding: 6px 10px; }
+    .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+    .empty-hint { color: #909399; font-size: 13px; padding: 20px 0; text-align: center; }
+    .status-tag { margin-left: auto; }
+    .step-num {
+      width: 20px; height: 20px; border-radius: 50%; background: #409eff; color: #fff;
+      font-size: 12px; display: inline-flex; align-items: center; justify-content: center; margin-right: 6px;
+    }
+  </style>
+</head>
+<body>
+<div id="app" v-cloak>
+  <div class="page-header">
+    <span class="logo">⚡</span>
+    <div>
+      <h1>Jev 调试广场</h1>
+      <div class="sub">Vercel AI Gateway · typesafe-ai/jev · evaluation 模型调试台</div>
+    </div>
+  </div>
+
+  <div class="main">
+    <el-row :gutter="16">
+      <!-- ============ 左侧:配置 + 需求 ============ -->
+      <el-col :xs="24" :md="10">
+        <!-- LLM 配置 -->
+        <el-card class="card" shadow="never">
+          <template #header>
+            <div class="card-title"><span class="dot dot-llm"></span>① LLM 配置(chatcompatible)</div>
+          </template>
+          <div class="field-row">
+            <div class="field-label">Base URL <span style="color:#f56c6c">*</span></div>
+            <el-input v-model="config.llm.baseURL" placeholder="https://api.openai.com/v1" clearable></el-input>
+          </div>
+          <div class="field-row">
+            <div class="field-label">API Key(留空适配免鉴权服务)</div>
+            <el-input v-model="config.llm.apiKey" type="password" show-password placeholder="sk-..." clearable></el-input>
+          </div>
+          <div class="field-row">
+            <div class="field-label">模型 Model</div>
+            <el-select v-model="config.llm.model" filterable allow-create placeholder="选择或输入模型 ID" style="width:100%">
+              <el-option v-for="m in models" :key="m" :label="m" :value="m"></el-option>
+            </el-select>
+          </div>
+          <el-button type="primary" :loading="modelsLoading" @click="fetchModels" size="small">获取模型列表(/v1/models)</el-button>
+          <el-button type="success" :loading="savingLlm" @click="saveConfig" size="small">保存配置</el-button>
+        </el-card>
+
+        <!-- Jev 配置 -->
+        <el-card class="card" shadow="never">
+          <template #header>
+            <div class="card-title"><span class="dot dot-jev"></span>② Jev 调用配置</div>
+          </template>
+          <div class="field-row">
+            <div class="field-label">接入方式</div>
+            <el-radio-group v-model="config.jev.provider">
+              <el-radio value="vercel">Vercel AI Gateway</el-radio>
+              <el-radio value="typesafe">TypeSafe API</el-radio>
+            </el-radio-group>
+          </div>
+
+          <template v-if="config.jev.provider === 'vercel'">
+            <div class="field-row">
+              <div class="field-label">Gateway Base URL</div>
+              <el-input v-model="config.jev.vercel.baseURL" placeholder="https://ai-gateway.vercel.sh/v4/ai" clearable></el-input>
+            </div>
+            <div class="field-row">
+              <div class="field-label">API Key(vck_...)</div>
+              <el-input v-model="config.jev.vercel.apiKey" type="password" show-password clearable></el-input>
+            </div>
+            <div class="field-row">
+              <div class="field-label">模型</div>
+              <el-input v-model="config.jev.vercel.model" placeholder="typesafe-ai/jev" clearable></el-input>
+            </div>
+          </template>
+
+          <template v-else>
+            <div class="field-row">
+              <div class="field-label">TypeSafe Base URL</div>
+              <el-input v-model="config.jev.typesafe.baseURL" placeholder="https://api.typesafe.ai/v1" clearable></el-input>
+            </div>
+            <div class="field-row">
+              <div class="field-label">API Key(apikey_...)</div>
+              <el-input v-model="config.jev.typesafe.apiKey" type="password" show-password clearable></el-input>
+            </div>
+            <div class="field-row">
+              <div class="field-label">模型</div>
+              <el-input v-model="config.jev.typesafe.model" placeholder="jev-latest / jev-preview" clearable></el-input>
+            </div>
+          </template>
+
+          <el-button type="success" :loading="savingJev" @click="saveConfig" size="small">保存配置</el-button>
+        </el-card>
+
+        <!-- 需求输入 -->
+        <el-card class="card" shadow="never">
+          <template #header>
+            <div class="card-title"><span class="dot dot-param"></span>③ 评估需求</div>
+          </template>
+          <el-input
+            v-model="need"
+            class="need-box"
+            type="textarea"
+            placeholder="描述你想让 Jev 判断的内容,例如:&#10;&#10;我的支持工单:「客户说 Stripe 同步三天失败,要退款」,请判断该路由到哪个部门、紧急程度、以及是否在要求退款。"
+            :rows="5"
+          ></el-input>
+          <div style="margin-top:12px">
+            <el-button type="primary" :loading="genLoading" @click="genParams">✨ 生成 Jev 参数</el-button>
+            <span style="font-size:12px;color:#909399;margin-left:8px">用 LLM 根据需求产出 state + questions</span>
+          </div>
+        </el-card>
+      </el-col>
+
+      <!-- ============ 右侧:参数编辑 + 结果 ============ -->
+      <el-col :xs="24" :md="14">
+        <!-- 参数编辑 -->
+        <el-card class="card" shadow="never">
+          <template #header>
+            <div class="card-title"><span class="dot dot-param"></span>④ Jev 输入参数(可二次调整)<el-tag size="small" type="warning" style="margin-left:8px">JSON</el-tag></div>
+          </template>
+          <el-input
+            v-model="paramsText"
+            class="params-editor"
+            type="textarea"
+            :rows="16"
+            placeholder='{"state": ..., "questions": {...}}'
+          ></el-input>
+          <div class="toolbar" style="margin-top:12px">
+            <el-button size="small" @click="formatParams">格式化</el-button>
+            <el-button size="small" @click="validateParams">校验结构</el-button>
+            <el-button size="small" @click="loadSample">载入示例</el-button>
+            <el-button size="small" type="info" plain @click="clearParams">清空</el-button>
+            <el-button type="danger" size="small" :loading="jevLoading" @click="runJev">▶ 调用 Jev</el-button>
+          </div>
+        </el-card>
+
+        <!-- Jev 响应 -->
+        <el-card class="card" shadow="never">
+          <template #header>
+            <div class="card-title"><span class="dot dot-result"></span>⑤ Jev 响应结果
+              <el-tag v-if="jeSuccess" size="small" type="success" class="status-tag">调用成功</el-tag>
+              <el-tag v-else-if="jeError" size="small" type="danger" class="status-tag">调用失败</el-tag>
+            </div>
+          </template>
+
+          <div v-if="jeError" style="color:#f56c6c;font-size:13px;margin-bottom:10px">{{ jeError }}</div>
+
+          <div v-if="answersList.length">
+            <el-card v-for="a in answersList" :key="a.id" class="ans-card" shadow="hover">
+              <template #header>
+                <span class="ans-id">{{ a.id }}</span>
+                <el-tag size="small" :type="a.type==='boolean'?'info':(a.type==='choice'?'warning':'success')">{{ a.type }}</el-tag>
+              </template>
+
+              <!-- boolean -->
+              <template v-if="a.type === 'boolean'">
+                <div class="prob-row">
+                  <span class="prob-label">probability</span>
+                  <el-progress :percentage="pct(a.probability)" :stroke-width="14" :color="a.probability>=0.5 ? '#67c23a' : '#f56c6c'"></el-progress>
+                  <span class="prob-val">{{ a.probability }}</span>
+                </div>
+                <div class="verdict">
+                  判定:<b>{{ a.probability >= 0.5 ? 'TRUE' : 'FALSE' }}</b>
+                  <span v-if="a.probability>=0.8 || a.probability<=0.2" style="color:#67c23a;font-size:12px;margin-left:8px">高置信</span>
+                  <span v-else style="color:#e6a23c;font-size:12px;margin-left:8px">结果模糊,建议人工复核</span>
+                </div>
+              </template>
+
+              <!-- choice -->
+              <template v-else-if="a.type === 'choice'">
+                <div class="verdict" style="margin-top:0;margin-bottom:8px">选中:<b>{{ a.choice }}</b>
+                  <el-tag v-if="a.confidence !== undefined" size="small" type="success" style="margin-left:8px">confidence {{ a.confidence }}</el-tag>
+                </div>
+                <div v-for="(p, k) in a.probabilities" :key="k" class="prob-row">
+                  <span class="prob-label">{{ k }}</span>
+                  <el-progress :percentage="pct(p)" :stroke-width="14"></el-progress>
+                  <span class="prob-val">{{ p }}</span>
+                </div>
+              </template>
+
+              <!-- score -->
+              <template v-else-if="a.type === 'score'">
+                <div class="verdict" style="margin-top:0;margin-bottom:8px">分数:<b>{{ a.score }}</b>
+                  <el-tag v-if="a.confidence !== undefined" size="small" type="success" style="margin-left:8px">confidence {{ a.confidence }}</el-tag>
+                  <span style="font-size:12px;color:#909399;margin-left:8px">(0 起算的加权均分)</span>
+                </div>
+                <div v-for="(p, k) in a.probabilities" :key="k" class="prob-row">
+                  <span class="prob-label">{{ (a.legend && a.legend[k] ? k + ' ' + a.legend[k] : 'level ' + k) }}</span>
+                  <el-progress :percentage="pct(p)" :stroke-width="14"></el-progress>
+                  <span class="prob-val">{{ p }}</span>
+                </div>
+              </template>
+            </el-card>
+
+            <div class="toolbar">
+              <el-button type="primary" size="small" :loading="explainLoading" @click="explainResult">💬 解释本次结果</el-button>
+            </div>
+          </div>
+          <div v-else-if="!jevLoading" class="empty-hint">尚未调用 —— 编辑左侧参数后点击「调用 Jev」</div>
+
+          <!-- 原始响应 -->
+          <el-collapse v-if="jevResult" style="margin-top:8px">
+            <el-collapse-item>
+              <template #title><span style="font-size:13px">原始响应(answers / usage / providerMetadata)</span></template>
+              <pre class="result-json">{{ jevResultJson }}</pre>
+            </el-collapse-item>
+          </el-collapse>
+        </el-card>
+
+        <!-- 解释输出 -->
+        <el-card v-if="explainText" class="card" shadow="never">
+          <template #header>
+            <div class="card-title"><span class="dot dot-jev"></span>⑥ 结果解释(LLM)</div>
+          </template>
+          <div class="explain-body" v-html="explainedHtml"></div>
+        </el-card>
+      </el-col>
+    </el-row>
+  </div>
+</div>
+
+<script>
+  // ---------- CDN 双源兜底加载 ----------
+  const CDNS = ['https://unpkg.com', 'https://cdn.jsdelivr.net/npm'];
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = src; s.onload = resolve; s.onerror = () => reject(new Error('加载失败 ' + src));
+      document.head.appendChild(s);
+    });
+  }
+  function loadCss(href) {
+    return new Promise((resolve, reject) => {
+      const l = document.createElement('link');
+      l.rel = 'stylesheet'; l.href = href;
+      l.onload = resolve; l.onerror = () => reject(new Error('加载失败 ' + href));
+      document.head.appendChild(l);
+    });
+  }
+  async function loadWithFallback(rel) {
+    let lastErr;
+    for (const base of CDNS) {
+      try { await loadScript(base + rel); return; } catch (e) { lastErr = e; }
+    }
+    throw lastErr;
+  }
+  (async () => {
+    try {
+      await loadCss('https://unpkg.com/element-plus@2.8.4/dist/index.css');
+      await loadWithFallback('/vue@3.4.38/dist/vue.global.prod.js');
+      await loadWithFallback('/element-plus@2.8.4/dist/index.full.min.js');
+      await loadWithFallback('/marked@12.0.2/marked.min.js');
+      bootstrap();
+    } catch (e) {
+      document.getElementById('app').innerHTML =
+        '<p style="padding:40px;color:#f56c6c">CDN 资源加载失败(请检查网络): ' + e.message + '</p>';
+    }
+  })();
+
+  function bootstrap() {
+    const { createApp, ref, reactive, computed, onMounted } = Vue;
+
+    const app = createApp({
+      setup() {
+        const config = reactive({
+          llm: { name: 'custom', baseURL: '', apiKey: '', model: '' },
+          jev: {
+            provider: 'vercel',
+            vercel: { baseURL: 'https://ai-gateway.vercel.sh/v4/ai', apiKey: '', model: 'typesafe-ai/jev' },
+            typesafe: { baseURL: 'https://api.typesafe.ai/v1', apiKey: '', model: 'jev-latest' },
+          },
+        });
+        const models = ref([]);
+        const need = ref('');
+        const paramsText = ref('');
+        const jevResult = ref(null);
+        const answersList = ref([]);
+        const jevLoading = ref(false);
+        const genLoading = ref(false);
+        const modelsLoading = ref(false);
+        const savingLlm = ref(false);
+        const savingJev = ref(false);
+        const explainLoading = ref(false);
+        const jeError = ref('');
+        const explainText = ref('');
+        const jeSuccess = ref(false);
+
+        const jevResultJson = computed(() => JSON.stringify(jevResult.value, null, 2));
+        const explainedHtml = computed(() => window.marked.parse(explainText.value || ''));
+
+        function pct(p) { return Math.round((p ?? 0) * 100); }
+
+        async function api(path, body) {
+          const res = await fetch(path, {
+            method: body === undefined ? 'GET' : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: body === undefined ? undefined : JSON.stringify(body),
+          });
+          const data = await res.json();
+          if (!data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+          return data;
+        }
+
+        async function loadConfig() {
+          try {
+            const data = await api('/api/config');
+            Object.assign(config.llm, data.config.llm);
+            const j = data.config.jev || {};
+            config.jev.provider = j.provider || 'vercel';
+            Object.assign(config.jev.vercel, j.vercel || {});
+            Object.assign(config.jev.typesafe, j.typesafe || {});
+          } catch (e) {
+            ElementPlus.ElMessage.warning('读取配置失败: ' + e.message);
+          }
+        }
+
+        async function saveConfig() {
+          try {
+            await api('/api/config', { llm: config.llm, jev: config.jev });
+            ElementPlus.ElMessage.success('配置已保存到服务器');
+          } catch (e) {
+            ElementPlus.ElMessage.error('保存失败: ' + e.message);
+          }
+        }
+
+        async function fetchModels() {
+          if (!config.llm.baseURL) {
+            ElementPlus.ElMessage.warning('请先填写 LLM Base URL');
+            return;
+          }
+          modelsLoading.value = true;
+          try {
+            const data = await api('/api/models', { llm: { baseURL: config.llm.baseURL, apiKey: config.llm.apiKey } });
+            models.value = data.models;
+            if (data.models.length && !config.llm.model) config.llm.model = data.models[0];
+            ElementPlus.ElMessage.success(`共获取 ${data.models.length} 个模型`);
+          } catch (e) {
+            ElementPlus.ElMessage.error(e.message);
+          } finally {
+            modelsLoading.value = false;
+          }
+        }
+
+        async function genParams() {
+          if (!need.value.trim()) {
+            ElementPlus.ElMessage.warning('请先输入评估需求');
+            return;
+          }
+          genLoading.value = true;
+          try {
+            const data = await api('/api/gen-params', { llm: config.llm, need: need.value });
+            paramsText.value = JSON.stringify(data.params, null, 2);
+            ElementPlus.ElMessage.success('参数已生成,可在下方二次调整');
+          } catch (e) {
+            ElementPlus.ElMessage.error(e.message);
+          } finally {
+            genLoading.value = false;
+          }
+        }
+
+        function parseParams() {
+          try {
+            return JSON.parse(paramsText.value);
+          } catch (e) {
+            throw new Error('参数 JSON 解析失败: ' + e.message);
+          }
+        }
+
+        function formatParams() {
+          try {
+            paramsText.value = JSON.stringify(parseParams(), null, 2);
+            ElementPlus.ElMessage.success('已格式化');
+          } catch (e) {
+            ElementPlus.ElMessage.error(e.message);
+          }
+        }
+
+        function validateParams() {
+          try {
+            const p = parseParams();
+            if (p.state === undefined) throw new Error('缺少 state 字段');
+            if (!p.questions || typeof p.questions !== 'object' || Array.isArray(p.questions)) {
+              throw new Error('questions 必须是对象');
+            }
+            const qs = Object.entries(p.questions);
+            if (!qs.length) throw new Error('questions 至少一个问题');
+            for (const [id, q] of qs) {
+              if (!q || typeof q !== 'object') throw new Error(`问题 "${id}" 必须是对象`);
+              if (!['boolean', 'choice', 'score'].includes(q.type)) throw new Error(`问题 "${id}" 的 type 必须是 boolean/choice/score`);
+              if (!q.instructions) throw new Error(`问题 "${id}" 缺少 instructions`);
+            }
+            ElementPlus.ElMessage.success('结构校验通过');
+            return p;
+          } catch (e) {
+            ElementPlus.ElMessage.error(e.message);
+            return null;
+          }
+        }
+
+        function clearParams() {
+          paramsText.value = '';
+          jevResult.value = null;
+          answersList.value = [];
+          jeError.value = '';
+          jeSuccess.value = false;
+          explainText.value = '';
+          ElementPlus.ElMessage.success('已清空');
+        }
+
+        function loadSample() {
+          paramsText.value = JSON.stringify({
+            state: {
+              subject: 'Stripe sync broken',
+              message: 'My Stripe connection has failed for three days and I am losing sales. Refund me for this month.',
+              plan: 'pro',
+              previousTickets: 2,
+            },
+            questions: {
+              department: {
+                type: 'choice',
+                instructions: 'Which team should handle this ticket?',
+                criteria: {
+                  billing: 'Charges, invoices, and refunds',
+                  technical: 'Bugs, outages, and integration failures',
+                  account: 'Login, permissions, and profile changes',
+                  other: 'Anything that does not fit the other teams',
+                },
+              },
+              severity: {
+                type: 'score',
+                instructions: 'How severe is the issue for the customer?',
+                criteria: [
+                  'Cosmetic or informational',
+                  'Degraded, but a workaround exists',
+                  'Blocking with no workaround',
+                  'Blocking and causing financial or data loss',
+                ],
+              },
+              requestsRefund: {
+                type: 'boolean',
+                instructions: 'Is the customer asking for money back?',
+              },
+            },
+          }, null, 2);
+        }
+
+        async function runJev() {
+          const p = validateParams();
+          if (!p) return;
+          jevLoading.value = true;
+          jeError.value = '';
+          jeSuccess.value = false;
+          explainText.value = '';
+          try {
+            const data = await api('/api/jev', {
+              jev: config.jev,
+              state: p.state,
+              questions: p.questions,
+            });
+            jevResult.value = data.result;
+            answersList.value = Object.entries(data.result.answers || {}).map(([id, ans]) => ({ id, ...ans }));
+            jeSuccess.value = true;
+            ElementPlus.ElMessage.success('Jev 调用成功');
+          } catch (e) {
+            jeError.value = e.message;
+            answersList.value = [];
+            jevResult.value = null;
+          } finally {
+            jevLoading.value = false;
+          }
+        }
+
+        async function explainResult() {
+          if (!jevResult.value) {
+            ElementPlus.ElMessage.warning('请先调用 Jev');
+            return;
+          }
+          explainLoading.value = true;
+          try {
+            const data = await api('/api/explain', {
+              llm: config.llm,
+              need: need.value,
+              result: jevResult.value,
+            });
+            explainText.value = data.text;
+          } catch (e) {
+            ElementPlus.ElMessage.error(e.message);
+          } finally {
+            explainLoading.value = false;
+          }
+        }
+
+        onMounted(loadConfig);
+
+        return {
+          config, models, need, paramsText, jevResult, answersList,
+          jevLoading, genLoading, modelsLoading, savingLlm, savingJev,
+          explainLoading, jeError, explainText, jeSuccess,
+          jevResultJson, explainedHtml, pct,
+          saveConfig, fetchModels, genParams, formatParams, validateParams,
+          loadSample, clearParams, runJev, explainResult,
+        };
+      },
+    });
+
+    app.use(ElementPlus);
+    app.mount('#app');
+  }
+</script>
+</body>
+</html>
