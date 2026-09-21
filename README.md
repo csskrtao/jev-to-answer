@@ -68,13 +68,13 @@ AI 整理可能 · Jev 帮你选择 · 每一页，都是一种新的可能
 | **补充新的条件** | 补全背景后重新生成选项并交给 Jev 评估 |
 | **拥有自己的答案书架** | 搜索、收藏、复制、重读与逐条删除历史答案 |
 | **用熟悉的方式阅读** | 浅色 / 深色主题、手机布局与桌面布局 |
-| **保留探索空间** | 支持 TypeSafe、Vercel 双通道，附带高级调试台 |
+| **打开就能提问** | 管理员统一配置模型，访客无需填写 API Key；支持 TypeSafe、Vercel 双通道 |
 
 ## 快速开始
 
 准备 **Node.js 22 或更新版本**（推荐当前 LTS），以及一个兼容 OpenAI Chat Completions 的大模型服务和一个 Jev 服务账号。
 
-### 1. 下载并启动
+### 1. 下载并配置本地服务
 
 在 PowerShell 中执行：
 
@@ -82,30 +82,91 @@ AI 整理可能 · Jev 帮你选择 · 每一页，都是一种新的可能
 git clone https://github.com/csskrtao/jev-to-answer.git
 cd jev-to-answer
 npm ci
+Copy-Item .env.example .env
+notepad .env
+```
+
+由管理员在 `.env` 中填写服务参数。下面仅为占位示例，请替换为自己的模型名称和密钥：
+
+```dotenv
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_MODEL=your-chat-model
+LLM_API_KEY=replace-with-your-llm-key
+JEV_PROVIDER=typesafe
+JEV_BASE_URL=https://api.typesafe.ai/v1
+JEV_MODEL=jev-latest
+JEV_API_KEY=replace-with-your-jev-key
+```
+
+`.env` 已被 Git 忽略，`npm start` 会自动读取它；不要把真实密钥写入前端、README 或提交到仓库。
+
+```powershell
 npm start
 ```
 
-打开 **[http://localhost:9001](http://localhost:9001)**。如果已经下载项目，在项目根目录运行最后两条命令即可。
+打开 **[http://localhost:9001](http://localhost:9001)**。这是独立运行的项目，有自己的依赖、配置和端口，无需同时启动 `jev_demo`。访客直接提问，费用由配置密钥的管理员承担。
 
-这是独立运行的项目，有自己的依赖、配置和端口，无需同时启动 `jev_demo`。
+### 2. 管理员配置与 Cloudflare 部署
 
-### 2. 连接模型
+页面和 API 一起发布为 **Cloudflare Workers**。密钥由管理员保存在 Workers Secrets；页面没有模型设置入口，访客不能读取或修改模型连接配置。
 
-点击侧栏「模型设置」，分别配置两种能力：
-
-| 配置项 | 负责什么 | 需要填写 |
+| 配置项 | 用途 | Cloudflare 保存位置 |
 | :--- | :--- | :--- |
-| **大模型** | 整理选项、解释结果、回答追问 | 服务地址、模型名称、API Key；支持获取模型列表 |
-| **Jev** | 对候选选项进行评估并给出选择 | 接入方式、对应服务地址、模型名称和 API Key |
+| `LLM_API_KEY` | 大模型服务密钥 | Secret |
+| `JEV_API_KEY` | 当前 Jev 通道的密钥 | Secret |
+| `LLM_BASE_URL`、`LLM_MODEL` | 大模型服务地址、模型名称 | 普通环境变量 |
+| `JEV_PROVIDER` | `typesafe`（默认）或 `vercel` | 普通环境变量 |
+| `JEV_BASE_URL`、`JEV_MODEL` | Jev 服务地址、模型名称 | 普通环境变量；可采用下表默认值 |
 
 Jev 的默认接入参数：
 
 | 接入方式 | 服务地址 | 模型 |
 | :--- | :--- | :--- |
-| TypeSafe API | `https://api.typesafe.ai/v1` | `jev-latest` |
-| Vercel AI Gateway | `https://ai-gateway.vercel.sh/v4/ai` | `typesafe-ai/jev` |
+| `typesafe` | `https://api.typesafe.ai/v1` | `jev-latest` |
+| `vercel` | `https://ai-gateway.vercel.sh/v4/ai` | `typesafe-ai/jev` |
 
-大模型 API Key 可以留空，以适配本地免鉴权服务。已配置的密钥留空保存会保留原值。**Jev 使用决策接口，不能当作聊天模型填入大模型栏。**
+**Jev 使用决策接口，不能当作聊天模型填写到 `LLM_MODEL`。**
+
+先在 `wrangler.jsonc` 的 `vars` 中填写普通环境变量；不要把密钥写进该文件。管理员部署时，在 PowerShell 中执行：
+
+```powershell
+npm ci
+npx wrangler login
+npx wrangler secret put LLM_API_KEY
+npx wrangler secret put JEV_API_KEY
+npx wrangler deploy --dry-run
+npm run deploy
+```
+
+`secret put` 会交互式提示输入密钥，避免将它直接写进命令历史。也可以在 Cloudflare 控制台的对应 Worker → Settings → Variables and Secrets 中管理。`deploy --dry-run` 只校验构建，不发布；确认配置后再执行 `npm run deploy`。
+
+当前访问地址为 **[https://jev-to-answer.skrtao.de](https://jev-to-answer.skrtao.de)**（`workers.dev` 地址仍可用）。
+
+本地模拟 Workers 时，将示例复制为已被 Git 忽略的 `.dev.vars`，填入自己的参数后运行：
+
+```powershell
+Copy-Item .env.example .dev.vars
+notepad .dev.vars
+npm run cf:dev
+```
+
+`.dev.vars` 只供本地模拟，不会替你配置线上 Secrets。
+
+**旧配置迁移：** 新版本不再读取本地 `data/config.json` 或 Cloudflare `CONFIG` KV，也不会删除其中的旧数据。升级前由管理员将旧模型参数和密钥手动迁移到 `.env` 或 Workers 环境变量／Secrets；未迁移时页面会显示“暂未就绪”。
+
+### 免费使用额度
+
+Cloudflare 使用 Durable Object 持久化计数，默认限制如下，可通过普通环境变量调整：
+
+| 环境变量 | 默认值 | 含义 |
+| :--- | :--- | :--- |
+| `REQUESTS_PER_MINUTE` | `12` | 每个 IP 每分钟的业务接口请求数 |
+| `REQUESTS_PER_DAY` | `60` | 每个 IP 每日的业务接口请求数 |
+| `GLOBAL_REQUESTS_PER_DAY` | `3000` | 全站每日的业务接口请求数 |
+
+每日额度按 **UTC 日期**重置。一次决策回答会请求两个业务接口，可能调用三次上游模型；普通问答只请求一次回答接口和一次大模型。重试、补充和追问会继续使用额度，失败的业务请求也占额度。因此接口额度不是回答条数，也不是金额上限。请同时在模型服务平台设置消费上限。
+
+本地 Node.js 服务使用内存计数，重启后清零；经过反向代理时，访客可能因相同的代理地址共享 IP 额度。线上 Cloudflare 的持久化限额不会因 Worker 实例重启清零。
 
 ### 3. 写下你的第一个问题
 
@@ -119,17 +180,23 @@ Jev 的默认接入参数：
 
 ```mermaid
 flowchart LR
-    A[写下问题与背景] --> B[大模型整理 2–4 个选项]
+    A[写下问题与背景] --> I{识别提问意图}
+    I -->|决策取舍| B[大模型整理 2–4 个选项]
+    I -->|评价、事实、闲聊或必要澄清| H[直接回应原问题]
     B --> C[Jev 评估并选择]
     C --> D[大模型结合结果解读]
     D --> E[收藏与重读]
     D --> F[继续追问]
+    H --> E
+    H --> F
     F --> G[大模型结合上下文回答]
 ```
 
 **整理、选择、解释各有分工。** Jev 的选择来自实际接口响应；解读失败时仍会保留已获得的选择。Vercel 通道没有提供概率分布时，页面只展示选择，不补造数值。
 
-继续追问由大模型结合原问题、候选选项、Jev 选择和最近 6 轮对话回答，不会冒充一次新的 Jev 决策；如果补充条件并重新评估，则会重新生成选项和调用 Jev。
+普通问答不生成候选、不调用 Jev，也不展示决策概率。只有缺少必要信息时才直接向用户澄清，不把“先补充信息”包装成答案选项。事实回答目前没有联网检索，不能用于核验最新消息。
+
+继续追问由大模型结合原问题、原回答和最近 6 轮对话回答；决策记录还会带入候选和 Jev 结果，不会冒充一次新的 Jev 决策。补充条件后重新识别意图，只有决策类才重新调用 Jev。意图识别由大模型完成，仍可能误判，应使用实际模型和代表性问题验证效果。
 
 选项百分比反映模型对候选的相对倾向，**不是现实中的成功率**。
 
@@ -137,13 +204,14 @@ flowchart LR
 
 | 数据 | 保存位置 | 说明 |
 | :--- | :--- | :--- |
-| 模型配置与密钥 | 服务端 `data/config.json` | 首次在设置中保存后生成，已被 Git 忽略；配置接口返回脱敏结果 |
+| 模型配置与密钥 | 本地 `.env`；Workers 本地模拟 `.dev.vars`；线上环境变量与 Secrets | 仅服务端读取，访客只获取是否就绪；本地密钥文件被 Git 忽略 |
+| Cloudflare 使用额度 | Durable Object | 持久化保存每 IP 与全站计数；本地运行使用内存计数 |
 | 答案、收藏与追问 | 当前浏览器本地存储 | 最多 100 条答案，每条保留最近 20 轮追问 |
 | 页面主题 | 当前浏览器 | 记住选择的外观偏好 |
 
 电脑与手机的历史独立，清除浏览器站点数据会清除本地历史。提问、相关上下文和追问会发送给你配置的模型服务进行处理。
 
-当前版本适用于本机或可信局域网，配置接口没有用户鉴权。公开部署前，需要添加访问控制、用户隔离和限流。
+公开站点的模型由管理员统一提供。原配置与调试 API 均返回 404，高级调试页面已撤下；业务接口只使用服务端配置，不接受访客指定模型地址或密钥。
 
 <details>
 <summary><strong>开发启动、修改端口与手机访问</strong></summary>
@@ -167,23 +235,31 @@ npm start
 
 ## 开发参考
 
-首页使用原生 **HTML / CSS / JavaScript** 和本地 SVG，书本插画由 CSS 绘制，无前端构建步骤，也不依赖 CDN。服务端使用 **Node.js、h3、Vercel AI SDK 与 Zod**。保留的高级调试台使用 Vue / Element Plus CDN，可从模型设置进入。
+首页使用原生 **HTML / CSS / JavaScript** 和本地 SVG，书本插画由 CSS 绘制，无前端构建步骤，也不依赖 CDN。服务端使用 **Node.js、h3、Vercel AI SDK 与 Zod**。公开站点只提供答案之书业务页面，高级调试台已撤下。
 
 ```text
 jev-to-answer/
-├─ public/              # 首页、交互、主题样式与高级调试台
+├─ public/              # 首页、交互与主题样式
 ├─ src/
 │  ├─ app.js            # HTTP 接口
 │  ├─ book.js           # 决策、补充条件与追问校验
 │  ├─ llm.js            # 选项生成、结果解释与追问
 │  ├─ jev.js            # TypeSafe / Vercel 双通道适配
-│  ├─ config-store.js   # 配置持久化与脱敏
+│  ├─ runtime-config.js # 从管理员环境变量读取模型配置
+│  ├─ quota.js          # 业务接口限额与持久化计数
+│  ├─ config.js         # 配置默认值及兼容工具
+│  ├─ config-store.js   # 旧本地配置工具，运行入口不再读取
+│  ├─ config-kv.js      # 旧 KV 配置工具，运行入口不再读取
 │  ├─ timeout.js        # 外部调用超时
-│  └─ static.js         # 静态文件服务
+│  └─ static.js         # 本地静态文件服务
 ├─ docs/images/         # README Logo 与页面截图
 ├─ test/                # 业务与接口测试
-├─ data/config.json     # 本地私有配置，不提交
-└─ server.mjs           # 服务入口，默认端口 9001
+├─ .env.example         # 管理员配置模板，不含真实密钥
+├─ .env                 # 本地私有配置，不提交
+├─ .dev.vars            # Workers 本地模拟配置，不提交
+├─ worker.js            # Cloudflare Workers 入口
+├─ wrangler.jsonc       # Cloudflare 部署配置
+└─ server.mjs           # 本地服务入口，默认端口 9001
 ```
 
 运行离线测试：
@@ -192,23 +268,23 @@ jev-to-answer/
 npm test
 ```
 
-测试使用注入依赖和本地 HTTP 服务，覆盖决策流程、追问上下文、概率校验、错误处理、超时与配置脱敏，不消耗真实 API 配额。
+测试使用注入依赖和本地 HTTP 服务，覆盖决策流程、追问上下文、概率校验、错误处理、超时及配置保护，不消耗真实 API 配额。
 
 <details>
 <summary><strong>HTTP API 速查</strong></summary>
 
 | 方法与路径 | 输入 | 输出 |
 | :--- | :--- | :--- |
-| `GET /api/config` | 无 | 脱敏配置与 `apiKeyConfigured` |
-| `POST /api/config` | `{llm, jev}` | 保存后的脱敏配置 |
-| `POST /api/models` | 可选 `{llm}` | `{models}` |
+| `GET /api/status` | 无 | `{ok: true, ready: boolean}`，不返回模型配置 |
 | `POST /api/book/options` | `{question, category, supplements?}` | `{options: {question, state, choices, supplements?}}` |
 | `POST /api/book/decide` | `{question, options, supplements?}` | `{decision: {choiceId, probabilities, explanation}}` |
 | `POST /api/book/follow-up` | `{question, options, decision, messages, followUp, supplements?}` | `{answer}` |
 
 成功响应包含 `ok: true`，失败响应为 `{ok: false, error}`。请将完整 `options` 传回决策与追问接口。`supplements` 为可选字符串数组，最多 5 条，重新评估和追问时应与选项中的补充信息保持一致。
 
-追问历史 `messages` 格式为 `[{question, answer}]`，最多传入 6 轮。解释失败时，决策结果标记 `explanationUnavailable: true`。程序调用配置接口可用 `clearApiKey: true` 明确清除相应密钥。
+`/api/book/options` 对普通问答返回 `{options: {kind: "direct", intent, question, supplements, title, answer}}`，其中 `intent` 为 `evaluation`、`fact`、`chat` 或 `clarification`。客户端应直接展示 `answer`，跳过 `/decide`；追问仍传回完整 `options`，`decision` 传 `null` 或省略。旧决策结构保持兼容。
+
+追问历史 `messages` 格式为 `[{question, answer}]`，最多传入 6 轮。解释失败时，决策结果标记 `explanationUnavailable: true`。原 `/api/config`、`/api/models` 及调试接口返回 404；管理员通过部署环境修改配置。
 
 </details>
 
@@ -218,7 +294,7 @@ npm test
 
 原项目把「自然语言需求 → 大模型生成参数 → Jev 评估 → 结果可视化与解释」串成一条可以亲手探索的路径，也为 TypeSafe 与 Vercel 双通道接入提供了实践参考。
 
-答案之书沿着这条路径继续往前：把调试台里的参数与评估，转化为日常生活中的提问、选择和解读；再用书页、收藏与追问，让每一次犹豫都有一个可以回来的地方。项目中保留的高级调试台，也留下了这段探索的起点。
+答案之书沿着这条路径继续往前：把调试台里的参数与评估，转化为日常生活中的提问、选择和解读；再用书页、收藏与追问，让每一次犹豫都有一个可以回来的地方。高级调试台是这段探索的起点；面向访客的公开版本已撤下调试入口与页面。
 
 感谢 `jev_demo` 的启发，以及 TypeSafe / Jev、Vercel AI SDK 和相关开源工具的支持。
 
