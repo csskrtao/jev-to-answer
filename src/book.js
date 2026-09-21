@@ -57,6 +57,7 @@ export function validateState(state, status = 400) {
 
 export function validateOptions(options, question, status = 400, supplements = []) {
   if (!isObject(options)) fail('请先生成选项', status);
+  if (options.kind !== undefined && options.kind !== 'decision') fail('当前回答不属于决策选项', status);
   if (options.question !== question) fail('问题已改变，请重新生成选项', status);
   const expectedSupplements = validateSupplements(supplements, status);
   const actualSupplements = validateSupplements(options.supplements, status);
@@ -84,6 +85,25 @@ export function validateOptions(options, question, status = 400, supplements = [
     state: validateState(options.state, status),
     choices,
     ...(actualSupplements.length ? { supplements: actualSupplements } : {}),
+  };
+}
+
+/** 直接回答拥有独立结构，不伪造候选、选择或概率；旧决策记录仍使用原校验。 */
+export function validateDirectAnswer(value, question, status = 400, supplements = []) {
+  if (!isObject(value) || value.kind !== 'direct') fail('直接回答格式无效', status);
+  const allowed = new Set(['kind', 'intent', 'question', 'supplements', 'title', 'answer']);
+  if (Object.keys(value).some((key) => !allowed.has(key))) fail('直接回答包含无效字段', status);
+  if (!['evaluation', 'fact', 'chat', 'clarification'].includes(value.intent)) fail('回答意图无效', status);
+  if (value.question !== question) fail('问题已改变，请重新提问', status);
+  const expected = validateSupplements(supplements, status);
+  const actual = validateSupplements(value.supplements, status);
+  if (expected.length !== actual.length || expected.some((item, index) => item !== actual[index])) {
+    fail('补充信息已改变，请重新提问', status);
+  }
+  return {
+    kind: 'direct', intent: value.intent, question, supplements: actual,
+    title: limitedString(value.title, '回答标题', 60, status),
+    answer: limitedString(value.answer, '回答', 2000, status),
   };
 }
 
@@ -156,6 +176,11 @@ export function createBookService({ generateOptions = generateBookOptions, evalu
       const category = body?.category === undefined ? '日常' : limitedString(body.category, '分类', 40);
       const generated = await generateOptions(config.llm, { question, category, supplements });
       if (!isObject(generated)) fail('大模型未返回有效选项，请重新尝试', 502);
+      // 分类与内容一起生成；普通问答在此结束，不进入 Jev 决策链路。
+      if (generated.kind === 'direct') {
+        return validateDirectAnswer({ ...generated, question, supplements }, question, 502, supplements);
+      }
+      if (generated.kind !== undefined && generated.kind !== 'decision') fail('大模型返回了无效的回答类型', 502);
       return validateOptions({ question, state: generated.state, choices: generated.choices, supplements }, question, 502, supplements);
     },
     async decide(config, body) {
@@ -194,6 +219,14 @@ export function createBookService({ generateOptions = generateBookOptions, evalu
     async followUp(config, body) {
       const question = validateQuestion(body?.question);
       const supplements = validateSupplements(body?.supplements);
+      if (body?.options?.kind === 'direct') {
+        const options = validateDirectAnswer(body.options, question, 400, supplements);
+        if (body.decision != null) fail('直接回答不能包含 Jev 决策结果');
+        const messages = validateFollowUpMessages(body?.messages);
+        const nextQuestion = limitedString(body?.followUp, '追问', 1000);
+        const answer = await followUp(config.llm, { question, options, decision: null, messages, followUp: nextQuestion });
+        return limitedString(answer, 'AI 回答', 2000, 502);
+      }
       const options = validateOptions(body?.options, question, 400, supplements);
       const decision = validateFollowUpDecision(body?.decision, options.choices);
       const messages = validateFollowUpMessages(body?.messages);
