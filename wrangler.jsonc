@@ -1,0 +1,53 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "answer-book",
+  "main": "worker.js",
+  "compatibility_date": "2025-10-11",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "workers_dev": true,
+  "preview_urls": true,
+  "routes": [
+    {
+      "pattern": "jev-to-answer.skrtao.de",
+      "custom_domain": true
+    }
+  ],
+  "observability": {
+    "enabled": true
+  },
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": [
+      "/api/*"
+    ]
+  },
+  "vars": {
+    "LLM_BASE_URL": "https://api.deepseek.com/v1",
+    "LLM_MODEL": "deepseek-chat",
+    "JEV_PROVIDER": "typesafe",
+    "JEV_BASE_URL": "https://api.typesafe.ai/v1",
+    "JEV_MODEL": "jev-latest",
+    "REQUESTS_PER_MINUTE": "12",
+    "REQUESTS_PER_DAY": "60",
+    "GLOBAL_REQUESTS_PER_DAY": "3000"
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "USAGE_QUOTA",
+        "class_name": "UsageQuota"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1-usage-quota",
+      "new_sqlite_classes": [
+        "UsageQuota"
+      ]
+    }
+  ]
+}
