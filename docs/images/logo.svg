@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">答案之书</title>
+  <desc id="desc">陶土色底上的书与星光，象征新的可能。</desc>
+  <!-- 延续站点书本标识，用纸张与星光呼应首页视觉。 -->
+  <rect width="128" height="128" rx="30" fill="#B86645"/>
+  <rect x="8" y="8" width="112" height="112" rx="24" stroke="#FFF5DC" stroke-opacity=".3"/>
+  <path d="M29 38h20c9 0 15 5 15 12v48c-4-7-10-11-20-11H29V38Zm70 0H79c-9 0-15 5-15 12v48c4-7 10-11 20-11h15V38Z" fill="#FFF5DC" fill-opacity=".08" stroke="#FFF5DC" stroke-width="3" stroke-linejoin="round"/>
+  <path d="m64 17 3.5 9.5L77 30l-9.5 3.5L64 43l-3.5-9.5L51 30l9.5-3.5L64 17Z" fill="#FFF5DC"/>
+  <path d="M38 57h12m-12 10h12m28-10h12M78 67h12" stroke="#FFF5DC" stroke-opacity=".6" stroke-width="2" stroke-linecap="round"/>
+</svg>
