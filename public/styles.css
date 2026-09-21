@@ -2832,7 +2832,6 @@ main {
 .supplement-context ol { padding-left: 23px; margin: 10px 0 0; }
 .supplement-context li { margin-top: 7px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .supplement-button { color: var(--accent); }
-.history-supplement { color: var(--muted); font-size: 10px; }
 @media (max-width: 760px) {
   .supplement-panel { padding: 22px 19px; }
   .supplement-panel h2 { font-size: 17px; }
