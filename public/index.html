@@ -16,6 +16,7 @@
     <!-- 在样式加载前应用主题，避免深色模式刷新时先闪出浅色页面。 -->
     <script src="/theme.js"></script>
     <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/reader.css" />
     <script type="module" src="/app.js"></script>
   </head>
   <body>
@@ -202,18 +203,11 @@
             </form>
             <div class="form-error" id="form-error" role="alert" hidden></div>
           </section>
-          <section
-            id="journey"
-            class="journey"
-            aria-live="polite"
-            hidden
-          ></section>
-          <section
-            id="result"
-            class="result-section"
-            aria-live="polite"
-            hidden
-          ></section>
+          <button id="resume-reader" class="reader-resume" type="button" data-action="resume-reader" hidden>
+            <span data-icon="book-open"></span>
+            <span><strong id="resume-reader-label">继续阅读这一页</strong><small>你的答案留在这里，随时可以翻开</small></span>
+            <span data-icon="arrow"></span>
+          </button>
           <section class="inspiration" aria-labelledby="inspiration-heading">
             <div class="section-heading">
               <h2 id="inspiration-heading">
@@ -281,6 +275,18 @@
         <span data-icon="settings"></span>设置
       </button>
     </nav>
+    <!-- 阅读器独立于首页，内容在书页中切换，不再向下叠加。原生 dialog 同时提供焦点约束与 Esc 关闭。 -->
+    <dialog id="reader-dialog" class="reader-dialog" aria-labelledby="reader-title">
+      <div class="reader-shell">
+        <header class="reader-toolbar">
+          <div class="reader-brand"><span data-icon="book-open"></span><h2 id="reader-title">属于你的这一页</h2><span class="reader-subtitle">THE BOOK OF ANSWERS</span></div>
+          <button id="reader-cancel" class="text-button" type="button" data-action="cancel" hidden>取消思考</button>
+          <button id="close-reader" class="icon-button" type="button" aria-label="合上书本" title="合上书本"><span data-icon="close"></span></button>
+        </header>
+        <section id="journey" class="journey reader-journey" aria-live="polite" hidden></section>
+        <section id="result" class="reader-result" hidden></section>
+      </div>
+    </dialog>
     <dialog
       id="settings-dialog"
       class="settings-dialog"

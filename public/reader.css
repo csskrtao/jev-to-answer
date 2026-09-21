@@ -1,0 +1,1514 @@
+/* 阅读器单独限定高度：翻页、追问都在书页内完成，页面不再随回答不断拉长。 */
+body:has(.reader-dialog[open]) {
+  overflow: hidden;
+}
+
+.reader-dialog {
+  --reader-paper: #fffdf6;
+  --reader-left: #f1f1e7;
+  --reader-soft: #f4f4ec;
+  --reader-ink: #394735;
+  --reader-muted: #78816f;
+  --reader-line: #dfe3d4;
+  --reader-green: #657955;
+  --reader-green-soft: #e7eddf;
+  width: min(1120px, calc(100vw - 64px));
+  height: min(780px, calc(100dvh - 64px));
+  max-width: none;
+  max-height: none;
+  padding: 0;
+  margin: auto;
+  border: 1px solid #d4dac9;
+  border-radius: 18px;
+  background: var(--reader-paper);
+  color: var(--reader-ink);
+  overflow: hidden;
+  box-shadow: 0 32px 110px #20291c45, 0 3px 14px #20291c15;
+}
+
+.reader-dialog::backdrop {
+  background: #242d235e;
+  backdrop-filter: blur(7px);
+}
+
+.reader-dialog[open] {
+  animation: reader-arrive 350ms cubic-bezier(.2, .75, .3, 1) both;
+}
+
+.reader-dialog .reader-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 工具栏与操作栏不参与内容滚动，始终保留关闭、页签和再次提问入口。 */
+.reader-dialog .reader-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  flex: 0 0 auto;
+  min-height: 76px;
+  padding: 15px 28px;
+  border-bottom: 1px solid var(--reader-line);
+  background: var(--reader-paper);
+  z-index: 2;
+}
+
+.reader-dialog .reader-brand {
+  display: grid;
+  grid-template-columns: 25px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-items: center;
+  column-gap: 12px;
+  min-width: 0;
+  color: var(--reader-green);
+}
+
+.reader-dialog .reader-brand > .icon {
+  width: 25px;
+  height: 25px;
+}
+
+.reader-dialog .reader-brand > :first-child {
+  grid-column: 1;
+  grid-row: 1 / 3;
+}
+
+.reader-dialog .reader-brand > h2,
+.reader-dialog .reader-brand > .reader-subtitle {
+  grid-column: 2;
+}
+
+.reader-dialog #reader-cancel {
+  margin-left: auto;
+  white-space: nowrap;
+  color: var(--reader-green);
+  font-size: 11px;
+}
+
+.reader-dialog #reader-title {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 1.6;
+  letter-spacing: 2px;
+  color: var(--reader-ink);
+}
+
+.reader-dialog .reader-subtitle {
+  display: block;
+  margin-top: 2px;
+  color: var(--reader-muted);
+  font-size: 10px;
+  line-height: 1.5;
+  letter-spacing: 1px;
+}
+
+.reader-dialog #close-reader {
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--reader-line);
+  border-radius: 50%;
+  color: var(--reader-muted);
+}
+
+.reader-dialog #close-reader:hover {
+  background: var(--reader-soft);
+  color: var(--reader-ink);
+}
+
+.reader-dialog .reader-result {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+}
+
+.reader-dialog .reader-book {
+  position: relative;
+  perspective: 1600px;
+  display: grid;
+  grid-template-columns: minmax(0, .82fr) minmax(0, 1.3fr);
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--reader-paper);
+}
+
+/* 新答案先呈现封面，再沿书脊翻开；完成后完全隐藏，不覆盖可操作的正文。 */
+.reader-dialog .reader-opening-cover {
+  position: absolute;
+  z-index: 3;
+  inset: 0 0 0 38.6792%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  padding: 35px;
+  overflow: hidden;
+  border: 1px solid #738367;
+  border-radius: 0 5px 5px 0;
+  background: linear-gradient(90deg, #516346 0, #7f8e6d 9px, #899776 16px, #82926f 98%, #72825f);
+  color: #eee2bc;
+  box-shadow: inset 1px 0 5px #35452f30, 5px 3px 16px #28351f1a;
+  text-align: center;
+  transform-origin: left center;
+  transform-style: preserve-3d;
+  backface-visibility: hidden;
+  pointer-events: none;
+  animation: reader-open-cover 850ms cubic-bezier(.32, .05, .35, 1) forwards;
+}
+
+.reader-dialog .reader-opening-cover::before,
+.reader-dialog .reader-opening-cover::after {
+  content: "";
+  position: absolute;
+  inset: 23px;
+  border: 1px solid #e3d7ad9c;
+  pointer-events: none;
+}
+
+.reader-dialog .reader-opening-cover::after {
+  inset: 28px;
+  border-color: #e3d7ad4d;
+}
+
+.reader-dialog .reader-opening-cover > span {
+  max-width: 220px;
+  font-family: Georgia, serif;
+  font-size: 12px;
+  line-height: 1.8;
+  letter-spacing: 4px;
+}
+
+.reader-dialog .reader-opening-cover > strong {
+  font-family: var(--serif);
+  font-size: clamp(29px, 3vw, 42px);
+  font-weight: 500;
+  line-height: 1.7;
+  letter-spacing: 8px;
+}
+
+.reader-dialog .reader-opening-cover > i {
+  font-size: 47px;
+  font-style: normal;
+  line-height: 1;
+}
+
+.reader-dialog .reader-opening-cover > small {
+  font-size: 10px;
+  line-height: 1.9;
+  letter-spacing: 3px;
+}
+
+/* 中缝渐变和两侧纸张明暗营造摊开的书本，内容仍使用可访问的普通 HTML。 */
+.reader-dialog .reader-context {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-height: 0;
+  min-width: 0;
+  padding: 34px 37px 24px;
+  background: linear-gradient(90deg, transparent 92%, #40512c08), var(--reader-left);
+  border-right: 1px solid var(--reader-line);
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  overscroll-behavior: contain;
+}
+
+.reader-dialog .reader-context-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.reader-dialog .reader-context .section-kicker {
+  color: var(--reader-muted);
+  font-size: 9px;
+  line-height: 1.6;
+  letter-spacing: 1.7px;
+}
+
+.reader-dialog .reader-ribbon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  align-self: flex-start;
+  width: 28px;
+  height: 45px;
+  margin-top: -34px;
+  padding: 0 0 7px;
+  background: #8c9c78;
+  color: #fafcf5;
+  font-size: 15px;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 82%, 0 100%);
+}
+
+.reader-dialog .reader-dedication {
+  margin-top: 18px;
+}
+
+.reader-dialog .reader-dedication h3 {
+  margin: 0 0 12px;
+  font-family: var(--serif);
+  font-size: clamp(23px, 2.2vw, 31px);
+  line-height: 1.7;
+  font-weight: 500;
+  letter-spacing: 2px;
+}
+
+.reader-dialog .reader-dedication p {
+  margin: 0;
+  color: var(--reader-muted);
+  font-size: 12px;
+  line-height: 1.9;
+}
+
+.reader-dialog .reader-question {
+  position: relative;
+  margin: 5px 0 0;
+  padding: 18px 0 0;
+  border-top: 1px solid var(--reader-line);
+  color: var(--reader-ink);
+  font-family: var(--serif);
+  font-size: 16px;
+  line-height: 2;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.reader-dialog .reader-question-details {
+  color: var(--reader-muted);
+  font-size: 12px;
+  line-height: 1.9;
+  overflow-wrap: anywhere;
+}
+
+.reader-dialog .reader-question-details summary,
+.reader-dialog .supplement-context summary {
+  cursor: pointer;
+  color: var(--reader-green);
+  font-size: 11px;
+}
+
+.reader-dialog .reader-question-details p {
+  margin: 10px 0 0;
+  white-space: pre-wrap;
+}
+
+.reader-dialog .reader-context-notes {
+  color: var(--reader-muted);
+  font-size: 11px;
+  line-height: 1.9;
+}
+
+.reader-dialog .reader-context-notes .supplement-context {
+  margin-top: 0;
+  color: var(--reader-muted);
+}
+
+.reader-dialog .reader-context-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: auto;
+  padding-top: 18px;
+  color: var(--reader-muted);
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.reader-dialog .reader-ornament {
+  color: #a1ab8e;
+  font-size: 28px;
+  line-height: 1;
+}
+
+.reader-dialog .reader-page {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: linear-gradient(90deg, #40512c05, transparent 22px), var(--reader-paper);
+  overflow: hidden;
+}
+
+.reader-dialog .reader-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  flex: 0 0 auto;
+  gap: 4px;
+  margin: 19px 26px 0;
+  padding: 0 0 12px;
+  border-bottom: 1px solid var(--reader-line);
+}
+
+.reader-dialog .reader-tab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 0;
+  min-height: 38px;
+  padding: 8px 5px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--reader-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.reader-dialog .reader-tab:hover {
+  color: var(--reader-green);
+  background: var(--reader-soft);
+}
+
+.reader-dialog .reader-tab[aria-selected="true"] {
+  color: var(--reader-green);
+  background: var(--reader-green-soft);
+  font-weight: 600;
+}
+
+.reader-dialog .reader-tab-number {
+  font-family: Georgia, serif;
+  font-size: 10px;
+  opacity: .65;
+}
+
+/* min-height: 0 必须沿父级连续传递，长文本才能在指定书页内滚动。 */
+.reader-dialog .reader-panels {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.reader-dialog .reader-panel {
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  padding: 28px 32px;
+  overflow-wrap: anywhere;
+}
+
+.reader-dialog .reader-scroll,
+.reader-dialog .followup-messages {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #c8d0bc transparent;
+  scrollbar-gutter: stable;
+}
+
+.reader-dialog .reader-answer-kicker {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 8px 0 15px;
+  color: var(--reader-green);
+  font-size: 11px;
+  letter-spacing: 1px;
+}
+
+.reader-dialog .reader-answer-kicker .icon {
+  width: 16px;
+  height: 16px;
+}
+
+.reader-dialog .reader-answer-title {
+  margin: 0;
+  color: var(--reader-ink);
+  font-family: var(--serif);
+  font-size: clamp(25px, 2.7vw, 35px);
+  font-weight: 500;
+  line-height: 1.55;
+  letter-spacing: 1px;
+}
+
+.reader-dialog .reader-answer-description {
+  margin: 17px 0 0;
+  color: var(--reader-muted);
+  font-size: 13px;
+  line-height: 1.95;
+  white-space: pre-wrap;
+}
+
+.reader-dialog .reader-divider {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  width: 100%;
+  margin: 26px 0;
+  color: #a8b096;
+  font-size: 14px;
+}
+
+.reader-dialog .reader-divider::before,
+.reader-dialog .reader-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--reader-line);
+}
+
+.reader-dialog .reader-explanation {
+  margin: 0;
+  color: var(--reader-ink);
+  font-size: 14px;
+  line-height: 2.15;
+  white-space: pre-wrap;
+}
+
+.reader-dialog .reader-gentle-note {
+  margin: 25px 0 0;
+  color: var(--reader-muted);
+  font-family: var(--serif);
+  font-size: 11px;
+  line-height: 1.9;
+}
+
+.reader-dialog .reader-panel-heading {
+  margin: 0 0 9px;
+  font-family: var(--serif);
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 1.6;
+  color: var(--reader-ink);
+}
+
+.reader-dialog .reader-panel-intro,
+.reader-dialog .supplement-intro {
+  margin: 0 0 20px;
+  color: var(--reader-muted);
+  font-size: 12px;
+  line-height: 1.9;
+}
+
+.reader-dialog .reader-choice {
+  margin-bottom: 12px;
+  padding: 16px;
+  border: 1px solid var(--reader-line);
+  border-radius: 9px;
+  background: var(--reader-paper);
+}
+
+.reader-dialog .reader-choice.chosen {
+  border-color: #b8c5a7;
+  background: var(--reader-green-soft);
+}
+
+.reader-dialog .reader-choice summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.reader-dialog .reader-choice summary::-webkit-details-marker {
+  display: none;
+}
+
+.reader-dialog .reader-choice summary::after {
+  content: none;
+}
+
+.reader-dialog .reader-choice summary > .icon:last-child {
+  transition: transform 180ms ease;
+  color: var(--reader-muted);
+}
+
+.reader-dialog .reader-choice[open] summary > .icon:last-child {
+  transform: rotate(90deg);
+}
+
+.reader-dialog .reader-choice .choice-title {
+  color: var(--reader-ink);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.reader-dialog .reader-choice .choice-description {
+  margin-top: 12px;
+  color: var(--reader-muted);
+  font-size: 12px;
+  line-height: 1.9;
+}
+
+.reader-dialog .reader-choice .choice-percent,
+.reader-dialog .reader-choice .choice-letter {
+  color: var(--reader-green);
+}
+
+.reader-dialog .reader-choice .icon {
+  width: 16px;
+  height: 16px;
+}
+
+.reader-dialog .probability-note {
+  color: var(--reader-muted);
+  line-height: 1.8;
+}
+
+/* 追问每次只展示一轮，分页和输入框固定，只有问答正文可以滚动。 */
+.reader-dialog .reader-panel[data-reader-panel="followup"] {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 15px 25px 20px;
+}
+
+.reader-dialog .followup-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex: 0 0 auto;
+  min-height: 34px;
+  margin-bottom: 5px;
+}
+
+.reader-dialog .followup-pagination button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 5px 8px;
+  font-size: 11px;
+  color: var(--reader-green);
+}
+
+.reader-dialog .followup-pagination button:disabled {
+  cursor: default;
+  opacity: .4;
+}
+
+.reader-dialog .followup-pagination .icon {
+  width: 14px;
+  height: 14px;
+}
+
+.reader-dialog [data-followup-page="-1"] .icon {
+  transform: rotate(180deg);
+}
+
+.reader-dialog #followup-page-label {
+  color: var(--reader-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.reader-dialog .followup-messages {
+  flex: 1 1 0;
+  min-height: 0;
+  padding: 2px 6px 5px 0;
+}
+
+.reader-dialog .followup-turn {
+  margin: 4px 0 10px;
+}
+
+.reader-dialog .chat-question {
+  margin-left: 20px;
+  padding: 12px 15px;
+  background: var(--reader-green-soft);
+}
+
+.reader-dialog .chat-question > span,
+.reader-dialog .chat-answer > span {
+  color: var(--reader-green);
+  font-size: 10px;
+}
+
+.reader-dialog .chat-question > p,
+.reader-dialog .chat-answer > p {
+  color: var(--reader-ink);
+  font-size: 13px;
+  line-height: 1.95;
+}
+
+.reader-dialog .chat-answer {
+  margin: 12px 12px 0 0;
+  padding: 14px 15px;
+  background: var(--reader-soft);
+  border-color: var(--reader-line);
+}
+
+.reader-dialog .chat-thinking {
+  flex-wrap: wrap;
+  color: var(--reader-muted);
+}
+
+.reader-dialog .reader-chat-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 140px;
+  height: 100%;
+  padding: 16px;
+  text-align: center;
+}
+
+.reader-dialog .reader-chat-empty > .icon,
+.reader-dialog .reader-chat-empty > span {
+  color: var(--reader-green);
+  font-size: 28px;
+}
+
+.reader-dialog .reader-chat-empty h3 {
+  margin: 12px 0 7px;
+  font-family: var(--serif);
+  font-size: 19px;
+  font-weight: 500;
+  line-height: 1.65;
+}
+
+.reader-dialog .reader-chat-empty p {
+  margin: 0;
+  color: var(--reader-muted);
+  font-size: 11px;
+  line-height: 1.85;
+}
+
+.reader-dialog .followup-suggestions {
+  flex: 0 0 auto;
+  gap: 6px;
+  margin: 10px 0;
+}
+
+.reader-dialog .followup-suggestions button {
+  padding: 7px 9px;
+  border-color: var(--reader-line);
+  background: var(--reader-soft);
+  color: var(--reader-green);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.reader-dialog .followup-suggestions button:hover {
+  background: var(--reader-green-soft);
+}
+
+.reader-dialog #followup-form {
+  flex: 0 0 auto;
+  padding: 11px 13px;
+  border-color: var(--reader-line);
+  background: var(--reader-paper);
+}
+
+.reader-dialog #followup-form:focus-within {
+  border-color: var(--reader-green);
+  box-shadow: 0 0 0 3px #91a67d14;
+}
+
+.reader-dialog #followup-input {
+  min-height: 45px;
+  height: 45px;
+  max-height: 85px;
+  resize: none;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--reader-ink);
+}
+
+.reader-dialog #followup-input::placeholder,
+.reader-dialog #supplement-input::placeholder {
+  color: var(--reader-muted);
+}
+
+.reader-dialog .followup-form-bottom {
+  gap: 8px;
+  margin-top: 7px;
+}
+
+.reader-dialog .followup-form-bottom > span,
+.reader-dialog .supplement-form-bottom > span {
+  color: var(--reader-muted);
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.reader-dialog .followup-form-bottom .primary-button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.reader-dialog #followup-error {
+  flex: 0 0 auto;
+  max-height: 64px;
+  overflow-y: auto;
+  margin-top: 8px;
+  padding: 8px 10px;
+  font-size: 11px;
+}
+
+.reader-dialog #supplement-input {
+  min-height: 150px;
+  max-height: 220px;
+  background: var(--reader-soft);
+  border-color: var(--reader-line);
+  color: var(--reader-ink);
+  font-size: 13px;
+}
+
+.reader-dialog .supplement-form-bottom {
+  flex-wrap: wrap;
+}
+
+.reader-dialog .supplement-form-bottom .primary-button {
+  margin-left: auto;
+}
+
+.reader-dialog .reader-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex: 0 0 auto;
+  min-height: 73px;
+  padding: 16px 27px;
+  border-top: 1px solid var(--reader-line);
+  background: var(--reader-paper);
+  z-index: 2;
+}
+
+.reader-dialog .reader-page-marker {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  color: var(--reader-muted);
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.reader-dialog .reader-page-marker > span:first-child {
+  color: var(--reader-green);
+  font-family: Georgia, serif;
+  font-size: 15px;
+  letter-spacing: 2px;
+}
+
+.reader-dialog .reader-page-marker > small {
+  font-size: 10px;
+}
+
+.reader-dialog .reader-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.reader-dialog .reader-actions .secondary-button {
+  min-height: 37px;
+  padding: 9px 12px;
+  border-color: var(--reader-line);
+  color: var(--reader-green);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.reader-dialog .reader-actions .secondary-button:hover,
+.reader-dialog .reader-actions .secondary-button.is-saved {
+  background: var(--reader-green-soft);
+  color: var(--reader-green);
+}
+
+.reader-dialog .reader-actions .primary-button {
+  min-height: 37px;
+  padding: 9px 13px;
+  font-size: 11px;
+}
+
+.reader-dialog .reader-actions .icon {
+  width: 15px;
+  height: 15px;
+}
+
+/* 等待期间仍在同一本书里，翻页动画只表达状态，不改变正文排版。 */
+.reader-dialog .reader-journey {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 0;
+  min-height: 0;
+  margin: 0;
+  padding: 28px 40px;
+  border: 0;
+  border-radius: 0;
+  background: radial-gradient(ellipse at 50% 35%, var(--reader-left), transparent 68%), var(--reader-paper);
+  overflow-y: auto;
+  text-align: center;
+  overscroll-behavior: contain;
+}
+
+.reader-dialog .journey-book {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 126px;
+  height: 83px;
+  margin: 15px 0 27px;
+  perspective: 450px;
+  filter: drop-shadow(0 10px 7px #45523615);
+}
+
+.reader-dialog .journey-book::before,
+.reader-dialog .journey-book::after,
+.reader-dialog .journey-book > span {
+  content: "";
+  position: absolute;
+  top: 0;
+  width: 62px;
+  height: 80px;
+  border: 1px solid #9cac88;
+  background: repeating-linear-gradient(0deg, transparent 0 11px, #bcc6ad55 11px 12px), #eff1e6;
+  background-size: 36px 45px, auto;
+  background-position: center 13px, center;
+  background-repeat: no-repeat;
+}
+
+.reader-dialog .journey-book::before {
+  left: 1px;
+  border-radius: 6px 0 0 4px;
+  transform: skewY(-5deg);
+}
+
+.reader-dialog .journey-book::after {
+  right: 1px;
+  border-radius: 0 6px 4px 0;
+  transform: skewY(5deg);
+}
+
+.reader-dialog .journey-book > span {
+  left: 63px;
+  z-index: 1;
+  border-radius: 0 6px 4px 0;
+  transform-origin: left center;
+  animation: reader-turn-page 2.8s ease-in-out infinite;
+}
+
+.reader-dialog .journey-book > span:nth-child(2) {
+  animation-delay: 1.4s;
+}
+
+.reader-dialog .journey-kicker {
+  margin-bottom: 14px;
+  color: var(--reader-green);
+  font-size: 10px;
+  line-height: 1.6;
+  letter-spacing: 2.8px;
+}
+
+.reader-dialog .journey-top {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 550px;
+}
+
+.reader-dialog .journey-top > .spinner,
+.reader-dialog .journey-top > .icon {
+  display: none;
+}
+
+.reader-dialog .journey-top h3 {
+  margin: 0 0 13px;
+  color: var(--reader-ink);
+  font-family: var(--serif);
+  font-size: 27px;
+  font-weight: 500;
+  line-height: 1.65;
+}
+
+.reader-dialog .journey-top p {
+  margin: 0;
+  color: var(--reader-muted);
+  font-size: 12px;
+  line-height: 1.95;
+  overflow-wrap: anywhere;
+}
+
+.reader-dialog .journey-options {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 9px;
+  max-width: 680px;
+  margin: 24px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.reader-dialog .journey-options li {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  max-width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--reader-line);
+  border-radius: 7px;
+  background: var(--reader-paper);
+  color: var(--reader-ink);
+  font-size: 11px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.reader-dialog .journey-options small {
+  color: var(--reader-green);
+  font-family: Georgia, serif;
+}
+
+.reader-dialog .journey-actions {
+  justify-content: center;
+  flex: 0 0 auto;
+  margin-top: 25px;
+}
+
+.reader-dialog .journey-progress {
+  display: flex;
+  justify-content: center;
+  gap: 9px;
+  margin-top: 30px;
+  color: var(--reader-muted);
+  font-size: 10px;
+  line-height: 1.8;
+}
+
+.reader-dialog .journey-progress > span {
+  padding: 5px 10px;
+  border-radius: 20px;
+}
+
+.reader-dialog .journey-progress > .is-current {
+  color: var(--reader-green);
+  background: var(--reader-green-soft);
+}
+
+.reader-dialog .journey-progress > .is-complete {
+  color: var(--reader-green);
+}
+
+/* 合上书本后保留轻量入口，可以继续阅读而不用重新生成。 */
+.reader-resume {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  width: 100%;
+  margin-top: 20px;
+  padding: 18px 22px;
+  border: 1px solid #d6ddca;
+  border-radius: 10px;
+  background: #edf1e5;
+  color: #647650;
+  text-align: left;
+}
+
+.reader-resume:hover {
+  background: #e5ecdb;
+  border-color: #b9c7a7;
+}
+
+.reader-resume > span {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.reader-resume strong {
+  font-family: var(--serif);
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.reader-resume small {
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 1.6;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: .8;
+}
+
+.reader-resume > .icon:first-child {
+  width: 25px;
+  height: 25px;
+}
+
+/* 深色纸张保留书页的明暗区别，同时提高辅助文字与控件边界的对比度。 */
+:root[data-theme="dark"] .reader-dialog {
+  --reader-paper: #272e24;
+  --reader-left: #22291f;
+  --reader-soft: #2d3529;
+  --reader-ink: #e2e8d9;
+  --reader-muted: #acb69f;
+  --reader-line: #47523d;
+  --reader-green: #bdcea8;
+  --reader-green-soft: #36442d;
+  border-color: #536046;
+  box-shadow: 0 32px 110px #0008;
+}
+
+:root[data-theme="dark"] .reader-dialog::backdrop {
+  background: #0d130db3;
+}
+
+:root[data-theme="dark"] .reader-dialog .reader-context {
+  background: linear-gradient(90deg, transparent 92%, #0002), var(--reader-left);
+}
+
+:root[data-theme="dark"] .reader-dialog .reader-page {
+  background: linear-gradient(90deg, #0002, transparent 22px), var(--reader-paper);
+}
+
+:root[data-theme="dark"] .reader-dialog .reader-choice.chosen {
+  border-color: #687d52;
+}
+
+:root[data-theme="dark"] .reader-dialog .reader-scroll,
+:root[data-theme="dark"] .reader-dialog .followup-messages {
+  scrollbar-color: #5e7050 transparent;
+}
+
+:root[data-theme="dark"] .reader-dialog .journey-book::before,
+:root[data-theme="dark"] .reader-dialog .journey-book::after,
+:root[data-theme="dark"] .reader-dialog .journey-book > span {
+  background-color: #46553a;
+  border-color: #91a57b;
+}
+
+:root[data-theme="dark"] .reader-resume {
+  background: #2b3724;
+  border-color: #4e6140;
+  color: #bfcea9;
+}
+
+:root[data-theme="dark"] .reader-resume:hover {
+  background: #35442c;
+  border-color: #71895a;
+}
+
+@media (max-width: 1000px) and (min-width: 761px) {
+  .reader-dialog .reader-book {
+    grid-template-columns: minmax(0, .7fr) minmax(0, 1.3fr);
+  }
+  .reader-dialog .reader-opening-cover {
+    left: 35%;
+  }
+  .reader-dialog .reader-context {
+    padding-left: 25px;
+    padding-right: 25px;
+  }
+  .reader-dialog .reader-panel {
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+  .reader-dialog .reader-tabs {
+    margin-left: 18px;
+    margin-right: 18px;
+  }
+  .reader-dialog .reader-tab-number {
+    display: none;
+  }
+  .reader-dialog .reader-page-marker > :not(:first-child) {
+    display: none;
+  }
+}
+
+/* 手机改为一张完整书页，原问题缩成页首摘要，输入框仍留在可见范围内。 */
+@media (max-width: 760px) {
+  .reader-dialog {
+    width: calc(100vw - 16px);
+    height: calc(100dvh - 24px);
+    border-radius: 13px;
+  }
+  .reader-dialog .reader-toolbar {
+    min-height: 65px;
+    padding: 11px 17px;
+    gap: 10px;
+  }
+  .reader-dialog #reader-title {
+    font-size: 16px;
+  }
+  .reader-dialog .reader-subtitle {
+    font-size: 9px;
+    letter-spacing: .5px;
+  }
+  .reader-dialog .reader-brand {
+    grid-template-columns: 22px minmax(0, 1fr);
+    column-gap: 9px;
+  }
+  .reader-dialog .reader-brand > .icon {
+    width: 22px;
+    height: 22px;
+  }
+  .reader-dialog #close-reader {
+    width: 34px;
+    height: 34px;
+  }
+  .reader-dialog .reader-book {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .reader-dialog .reader-opening-cover {
+    left: 0;
+    gap: 19px;
+    padding: 30px;
+    animation-duration: 680ms;
+  }
+  .reader-dialog .reader-context {
+    display: block;
+    max-height: 109px;
+    padding: 11px 20px;
+    border-right: 0;
+    border-bottom: 1px solid var(--reader-line);
+    background: var(--reader-left);
+  }
+  .reader-dialog .reader-context-top,
+  .reader-dialog .reader-dedication,
+  .reader-dialog .reader-context-bottom,
+  .reader-dialog .reader-ornament {
+    display: none;
+  }
+  .reader-dialog .reader-question {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    font-size: 12px;
+    line-height: 1.8;
+  }
+  .reader-dialog .reader-question-details,
+  .reader-dialog .reader-context-notes {
+    margin-top: 6px;
+    font-size: 11px;
+  }
+  .reader-dialog .reader-page {
+    background: var(--reader-paper);
+  }
+  .reader-dialog .reader-tabs {
+    gap: 2px;
+    margin: 11px 14px 0;
+    padding-bottom: 9px;
+  }
+  .reader-dialog .reader-tab {
+    min-height: 36px;
+    padding: 8px 3px;
+    font-size: 11px;
+  }
+  .reader-dialog .reader-tab-number {
+    font-size: 9px;
+  }
+  .reader-dialog .reader-panel {
+    padding: 22px 23px;
+  }
+  .reader-dialog .reader-answer-kicker {
+    margin-top: 0;
+    font-size: 10px;
+  }
+  .reader-dialog .reader-answer-title {
+    font-size: 27px;
+  }
+  .reader-dialog .reader-answer-description {
+    font-size: 12px;
+  }
+  .reader-dialog .reader-explanation {
+    font-size: 13px;
+    line-height: 2.1;
+  }
+  .reader-dialog .reader-divider {
+    margin: 22px 0;
+  }
+  .reader-dialog .reader-panel-heading {
+    font-size: 20px;
+  }
+  .reader-dialog .reader-footer {
+    min-height: 64px;
+    gap: 10px;
+    padding: 11px 15px;
+  }
+  .reader-dialog .reader-page-marker {
+    gap: 0;
+  }
+  .reader-dialog .reader-page-marker > span:first-child {
+    font-size: 12px;
+    letter-spacing: 1px;
+  }
+  .reader-dialog .reader-page-marker > :not(:first-child) {
+    display: none;
+  }
+  .reader-dialog .reader-actions {
+    gap: 6px;
+  }
+  .reader-dialog .reader-actions .secondary-button,
+  .reader-dialog .reader-actions .primary-button {
+    min-height: 36px;
+    padding: 8px;
+    gap: 5px;
+    font-size: 10px;
+  }
+  .reader-dialog .reader-actions .icon {
+    width: 13px;
+    height: 13px;
+  }
+  .reader-dialog .reader-panel[data-reader-panel="followup"] {
+    padding: 8px 15px 12px;
+  }
+  .reader-dialog .followup-pagination {
+    min-height: 30px;
+    margin-bottom: 2px;
+  }
+  .reader-dialog .followup-pagination button {
+    min-height: 30px;
+    font-size: 10px;
+  }
+  .reader-dialog #followup-page-label {
+    font-size: 10px;
+  }
+  .reader-dialog .chat-question {
+    margin-left: 13px;
+    padding: 10px 12px;
+  }
+  .reader-dialog .chat-answer {
+    margin-right: 4px;
+    padding: 12px;
+  }
+  .reader-dialog .chat-question > p,
+  .reader-dialog .chat-answer > p {
+    font-size: 12px;
+  }
+  .reader-dialog .followup-suggestions {
+    gap: 5px;
+    margin: 7px 0;
+  }
+  .reader-dialog .followup-suggestions button {
+    padding: 5px 7px;
+    font-size: 9px;
+  }
+  .reader-dialog #followup-form {
+    padding: 9px 10px;
+  }
+  .reader-dialog #followup-input {
+    min-height: 41px;
+    height: 41px;
+    font-size: 16px;
+    line-height: 1.4;
+  }
+  .reader-dialog #followup-input::placeholder {
+    font-size: 12px;
+  }
+  .reader-dialog .followup-form-bottom {
+    flex-direction: row;
+    align-items: center;
+    margin-top: 5px;
+  }
+  .reader-dialog .followup-form-bottom > span {
+    font-size: 9px;
+  }
+  .reader-dialog .followup-form-bottom .primary-button {
+    min-height: 32px;
+    padding: 7px 10px;
+    font-size: 10px;
+  }
+  .reader-dialog #supplement-input {
+    min-height: 125px;
+    font-size: 16px;
+  }
+  .reader-dialog #supplement-input::placeholder {
+    font-size: 12px;
+  }
+  .reader-dialog .supplement-form-bottom .primary-button {
+    margin-left: 0;
+  }
+  .reader-dialog .reader-journey {
+    padding: 22px;
+  }
+  .reader-dialog .journey-top h3 {
+    font-size: 22px;
+  }
+  .reader-dialog .journey-top p {
+    font-size: 11px;
+  }
+  .reader-dialog .journey-options {
+    margin-top: 18px;
+  }
+  .reader-dialog .journey-options li {
+    padding: 7px 10px;
+  }
+  .reader-dialog .journey-progress {
+    gap: 2px;
+    margin-top: 24px;
+    font-size: 9px;
+  }
+  .reader-dialog .journey-progress > span {
+    padding: 4px 7px;
+  }
+  .reader-resume {
+    gap: 12px;
+    padding: 16px;
+  }
+  .reader-resume strong {
+    font-size: 14px;
+  }
+}
+
+/* 横屏和软键盘压缩高度时，优先把可用空间留给当前回答与输入操作。 */
+@media (max-height: 650px) {
+  .reader-dialog {
+    height: calc(100dvh - 16px);
+  }
+  .reader-dialog .reader-toolbar {
+    min-height: 54px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+  .reader-dialog .reader-subtitle {
+    display: none;
+  }
+  .reader-dialog .reader-footer {
+    min-height: 55px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+  .reader-dialog .reader-context {
+    gap: 12px;
+  }
+  .reader-dialog .reader-dedication {
+    margin-top: 0;
+  }
+  .reader-dialog .reader-dedication h3 {
+    font-size: 24px;
+  }
+  .reader-dialog .reader-tabs {
+    margin-top: 9px;
+    padding-bottom: 8px;
+  }
+  .reader-dialog .followup-suggestions {
+    display: none;
+  }
+  .reader-dialog #followup-form {
+    margin-top: 7px;
+  }
+  .reader-dialog .reader-journey {
+    justify-content: flex-start;
+    padding-top: 25px;
+  }
+  .reader-dialog .journey-book {
+    transform: scale(.8);
+    margin: 0 0 10px;
+  }
+  .reader-dialog .journey-kicker {
+    margin-bottom: 6px;
+  }
+  .reader-dialog .journey-top h3 {
+    margin-bottom: 8px;
+    font-size: 23px;
+  }
+}
+
+@media (max-width: 760px) and (max-height: 650px) {
+  .reader-dialog .reader-context {
+    max-height: 57px;
+    padding-top: 7px;
+    padding-bottom: 7px;
+  }
+  .reader-dialog .reader-panel[data-reader-panel="followup"] {
+    padding-top: 4px;
+    padding-bottom: 8px;
+  }
+  .reader-dialog #followup-input {
+    min-height: 28px;
+    height: 28px;
+  }
+  .reader-dialog .reader-chat-empty {
+    min-height: 90px;
+    padding: 8px;
+  }
+  .reader-dialog .reader-chat-empty > .icon,
+  .reader-dialog .reader-chat-empty > span,
+  .reader-dialog .reader-chat-empty p {
+    display: none;
+  }
+}
+
+@media (max-width: 370px) {
+  .reader-dialog .reader-tab-number {
+    display: none;
+  }
+  .reader-dialog .reader-footer {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+  .reader-dialog .reader-actions {
+    gap: 4px;
+  }
+  .reader-dialog .reader-actions .secondary-button,
+  .reader-dialog .reader-actions .primary-button {
+    padding-left: 6px;
+    padding-right: 6px;
+  }
+  .reader-dialog .reader-actions .icon {
+    display: none;
+  }
+  .reader-dialog .followup-form-bottom > span {
+    max-width: 130px;
+  }
+}
+
+@keyframes reader-arrive {
+  from { opacity: 0; transform: perspective(1400px) translateY(16px) rotateX(4deg) scale(.97); }
+  to { opacity: 1; transform: perspective(1400px) translateY(0) rotateX(0) scale(1); }
+}
+
+@keyframes reader-turn-page {
+  0%, 15% { transform: rotateY(0deg); opacity: 0; }
+  25% { opacity: 1; }
+  75% { opacity: 1; }
+  90%, 100% { transform: rotateY(-180deg); opacity: 0; }
+}
+
+@keyframes reader-open-cover {
+  0%, 10% { transform: rotateY(0deg); opacity: 1; visibility: visible; }
+  65% { opacity: 1; visibility: visible; }
+  100% { transform: rotateY(-165deg); opacity: 0; visibility: hidden; }
+}
+
+/* 尊重系统减少动态效果的设置，等待状态仍以文字和步骤清楚表达。 */
+@media (prefers-reduced-motion: reduce) {
+  .reader-dialog .reader-opening-cover {
+    display: none;
+    animation: none;
+  }
+  .reader-dialog[open],
+  .reader-dialog .journey-book > span {
+    animation: none;
+  }
+  .reader-dialog *,
+  .reader-dialog *::before,
+  .reader-dialog *::after,
+  .reader-resume {
+    transition: none;
+    scroll-behavior: auto;
+  }
+}

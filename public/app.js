@@ -141,6 +141,12 @@ const state = {
   // 补充草稿按答案隔离；取消、重试或收藏重绘时，不丢失正在输入的信息。
   supplementDrafts: new Map(),
   supplementOpen: null,
+  // 书页与追问页码仅影响阅读，不改变答案或发送给模型的完整上下文。
+  readerTab: "answer",
+  readerRecordId: null,
+  followupPage: 0,
+  pendingFollowup: null,
+  followupDrafts: new Map(),
   controller: null,
   records: [],
   storageAvailable: true,
@@ -154,6 +160,9 @@ function hydrateIcons(root = document) {
 }
 function toast(message) {
   clearTimeout(toastTimer);
+  // dialog 位于浏览器顶层，提示也放入当前阅读器，避免被遮罩挡住。
+  const host = $("#reader-dialog").open ? $(".reader-shell") : document.body;
+  host.append($("#toast"));
   $("#toast").textContent = message;
   $("#toast").hidden = false;
   toastTimer = setTimeout(() => {
@@ -307,17 +316,55 @@ function setBusy(busy) {
   $$("[data-category],.prompt-card,#shuffle-prompts").forEach((button) => {
     button.disabled = busy;
   });
-  $$("[data-action='supplement'],#supplement-input,#supplement-send,[data-action='close-supplement'],#followup-input,#followup-send,[data-followup],[data-action='favorite-current']").forEach((control) => {
+  $$("#supplement-input,#supplement-send,#followup-input,#followup-send,[data-followup],[data-action='favorite-current'],.reader-actions [data-action='new']").forEach((control) => {
     control.disabled = busy;
   });
   if ($("#supplement-form")) $("#supplement-form").setAttribute("aria-busy", String(busy));
   $("#question-form").setAttribute("aria-busy", String(busy));
+  $("#reader-cancel").hidden = !busy || !state.followupBusy;
+  if (!busy && state.current && recordSupplements(state.current).length >= 5 && $("#supplement-send")) {
+    $("#supplement-send").disabled = true;
+    $("#supplement-input").disabled = true;
+  }
+  updateReaderResume();
+}
+
+// 合上书本不会中断请求；可以继续编辑首页或通过入口回到同一页。
+function updateReaderResume() {
+  $("#resume-reader").hidden = !state.current && !state.pending;
+  $("#resume-reader-label").textContent = state.busy ? "回到正在翻开的这一页" : "继续阅读这一页";
+}
+function openReader() {
+  const dialog = $("#reader-dialog");
+  if (!dialog.open) dialog.showModal();
+  updateReaderResume();
+}
+function closeReader() {
+  $("#reader-dialog").close();
+  updateReaderResume();
+}
+function showReaderTab(tab, focus = false) {
+  if (!["answer", "choices", "followup", "supplement"].includes(tab)) return;
+  state.readerTab = tab;
+  state.supplementOpen = tab === "supplement" ? state.current?.id : null;
+  $$("[data-reader-tab]").forEach((button) => {
+    const active = button.dataset.readerTab === tab;
+    button.setAttribute("aria-selected", String(active));
+    button.tabIndex = active ? 0 : -1;
+    if (active && focus) button.focus({ preventScroll: true });
+  });
+  $$("[data-reader-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.readerPanel !== tab;
+  });
+  const index = ["answer", "choices", "followup", "supplement"].indexOf(tab);
+  if ($("#reader-page-number")) $("#reader-page-number").textContent = `0${index + 1} / 04`;
 }
 function renderJourney(phase, options, error) {
   const element = $("#journey");
   const failed = phase === "error";
   element.hidden = false;
-  element.innerHTML = `<div class="journey-top">${failed ? icon("info") : '<span class="spinner"></span>'}<div><h3>${failed ? "答案还差最后一步" : phase === "options" ? "把纠结，整理成几种可能…" : "选项准备好了，Jev 正在认真权衡…"}</h3><p>${failed ? escapeHTML(error) : phase === "options" ? "AI 正在阅读你的问题，寻找值得尝试的方向。" : "接下来为你选出一个方向，并生成简短解读。"}</p></div></div>${options ? `<ul class="journey-options">${options.choices.map((choice, index) => `<li><small>${String.fromCharCode(65 + index)}</small>${escapeHTML(choice.title)}</li>`).join("")}</ul>` : ""}<div class="journey-actions">${failed ? '<button class="secondary-button" data-action="retry">' + icon("refresh") + '重试这一步</button><button class="text-button" data-action="settings">检查模型设置</button>' : '<button class="text-button" data-action="cancel">取消等待</button>'}</div>`;
+  $("#result").hidden = true;
+  element.innerHTML = `<div class="journey-book" aria-hidden="true"><span></span><span></span></div><span class="journey-kicker">A NEW CHAPTER IS WAITING</span><div class="journey-top">${failed ? icon("info") : '<span class="spinner"></span>'}<div><h3>${failed ? "答案还差最后一步" : phase === "options" ? "把纠结，整理成几种可能…" : "这一页，正在为你慢慢翻开…"}</h3><p>${failed ? escapeHTML(error) : phase === "options" ? "AI 正在阅读你的问题，寻找值得尝试的方向。" : "Jev 正在认真权衡，为你选出一个方向。"}</p></div></div>${options ? `<ul class="journey-options">${options.choices.map((choice, index) => `<li><small>${String.fromCharCode(65 + index)}</small>${escapeHTML(choice.title)}</li>`).join("")}</ul>` : ""}<div class="journey-progress" aria-label="生成进度"><span class="${options ? "is-complete" : "is-current"}">01 整理可能</span><span class="${options ? "is-current" : ""}">02 翻开答案</span></div><div class="journey-actions">${failed ? '<button class="secondary-button" data-action="retry">' + icon("refresh") + '重试这一步</button><button class="text-button" data-action="settings">检查模型设置</button><button class="text-button" data-action="' + (state.current ? "back-to-answer" : "close-reader") + '">' + (state.current ? "返回原答案" : "返回修改问题") + '</button>' : '<button class="text-button" data-action="cancel">取消等待</button>'}</div>`;
 }
 async function askQuestion(event) {
   event?.preventDefault();
@@ -349,10 +396,10 @@ async function runJourney() {
   setBusy(true);
   const controller = new AbortController();
   state.controller = controller;
+  openReader();
   try {
     if (!pending.options) {
       renderJourney("options");
-      $("#journey").scrollIntoView({ behavior: "smooth", block: "nearest" });
       const data = await api("/api/book/options", {
         body: {
           question: pending.question,
@@ -389,15 +436,17 @@ async function runJourney() {
     state.pending = null;
     $("#journey").hidden = true;
     renderResult(record);
-    if (state.view === "home")
-      $("#result").scrollIntoView({ behavior: "smooth", block: "start" });
-    else {
+    if ($("#reader-dialog").open) $("#reader-tab-answer").focus({ preventScroll: true });
+    if (state.view !== "home") {
       renderHistory();
       toast("你的新答案已准备好，已收录到「我的答案」。");
     }
   } catch (error) {
     if (controller.signal.aborted) {
       $("#journey").hidden = true;
+      state.pending = null;
+      if (state.current) renderResult(state.current);
+      else closeReader();
       toast(pending.parentId ? "已取消重新选择，原答案和补充内容已保留。" : "已取消等待，可以修改问题再试一次。");
     } else renderJourney("error", pending.options, readableError(error));
   } finally {
@@ -414,26 +463,9 @@ function recordSupplements(record) {
 
 function renderSupplement(record) {
   const supplements = recordSupplements(record);
-  if (supplements.length) {
-    $(".answer-top").insertAdjacentHTML("beforeend", `<details class="supplement-context"><summary>本次已结合 ${supplements.length} 条补充信息</summary><ol>${supplements.map((item) => `<li>${escapeHTML(item)}</li>`).join("")}</ol></details>`);
-  }
-  const expanded = state.supplementOpen === record.id;
-  $(".answer-actions [data-action='new']").insertAdjacentHTML("beforebegin", `<button type="button" class="secondary-button supplement-button" data-action="supplement" aria-controls="supplement-panel" aria-expanded="${expanded}">${icon("pen")}我要补充信息</button>`);
-  $("#result").insertAdjacentHTML("beforeend", `<section id="supplement-panel" class="supplement-panel" aria-labelledby="supplement-heading" ${expanded ? "" : "hidden"}><div class="section-heading"><h2 id="supplement-heading">让这次选择，更贴近你的情况</h2><button type="button" class="icon-button" data-action="close-supplement" aria-label="收起补充信息">${icon("close")}</button></div><p class="supplement-intro">补充预算、时间、顾虑或新的条件。我们会连同原问题${supplements.length ? "和之前的补充" : ""}重新整理选项、做出选择，原答案保留在历史中。</p><form id="supplement-form"><label class="sr-only" for="supplement-input">补充信息</label><textarea id="supplement-input" rows="4" maxlength="1000" placeholder="比如：我只有周六下午有空，预算不超过 100 元，希望尽量少走路…" aria-describedby="supplement-hint"></textarea><div class="supplement-form-bottom"><span id="supplement-hint">第 ${supplements.length + 1} 次补充 · 每次最多 1000 字，最多 5 次</span><button type="submit" class="primary-button" id="supplement-send">结合补充重新选择${icon("arrow")}</button></div></form><div id="supplement-error" class="form-error" role="alert" hidden></div></section>`);
+  const atLimit = supplements.length >= 5;
+  $("#reader-panel-supplement").innerHTML = `<span class="section-kicker">ADD A LITTLE CONTEXT</span><h3 class="reader-panel-heading">让答案，更懂你的处境。</h3><p class="supplement-intro">补充时间、预算或新的顾虑，我们会结合原问题重新选择。原答案和对话会留在「我的答案」中。</p><form id="supplement-form"><label class="sr-only" for="supplement-input">补充信息</label><textarea id="supplement-input" rows="5" maxlength="1000" placeholder="比如：我只有周六下午有空，预算不超过 100 元，希望尽量少走路…" aria-describedby="supplement-hint" ${atLimit ? "disabled" : ""}></textarea><div class="supplement-form-bottom"><span id="supplement-hint">${atLimit ? "已补充 5 次，可以整理信息后再问一题。" : `第 ${supplements.length + 1} 次补充 · 最多 1000 字`}</span><button type="submit" class="primary-button" id="supplement-send" ${atLimit ? "disabled" : ""}>结合补充重新选择${icon("arrow")}</button></div></form><div id="supplement-error" class="form-error" role="alert" hidden></div>${supplements.length ? `<details class="supplement-context"><summary>回看之前的 ${supplements.length} 条补充</summary><ol>${supplements.map((item) => `<li>${escapeHTML(item)}</li>`).join("")}</ol></details>` : ""}`;
   $("#supplement-input").value = state.supplementDrafts.get(record.id) || "";
-}
-
-function openSupplement() {
-  if (state.busy || !state.current) return;
-  if (recordSupplements(state.current).length >= 5) {
-    toast("这条问题已补充 5 次，可以整理已有信息后再问一题。");
-    return;
-  }
-  state.supplementOpen = state.current.id;
-  $("#supplement-panel").hidden = false;
-  $("[data-action='supplement']").setAttribute("aria-expanded", "true");
-  $("#supplement-panel").scrollIntoView({ behavior: "smooth", block: "nearest" });
-  $("#supplement-input").focus({ preventScroll: true });
 }
 
 async function askSupplement(event) {
@@ -476,25 +508,64 @@ function renderResult(record) {
       decision.probabilities[choice.id] >= 0 &&
       decision.probabilities[choice.id] <= 1,
   );
+  // 打开新答案时从第一页开始；同一条记录重绘时保留当前页码和草稿。
+  const openingNewPage = state.readerRecordId !== record.id;
+  if (openingNewPage) {
+    state.readerRecordId = record.id;
+    state.readerTab = "answer";
+    state.followupPage = Math.max(0, validFollowups(record).length - 1);
+  }
+  const tabs = [["answer", "答案"], ["choices", "其他可能"], ["followup", "继续聊"], ["supplement", "补充条件"]];
+  const choices = options.choices.map((choice, index) => {
+    const selected = choice.id === decision.choiceId;
+    const percent = hasProbabilities ? Math.round(decision.probabilities[choice.id] * 1000) / 10 : null;
+    return `<details class="reader-choice ${selected ? "chosen" : ""}" ${selected ? "open" : ""}><summary class="choice-title"><span class="choice-letter">${String.fromCharCode(65 + index)}</span><b>${escapeHTML(choice.title)}</b>${selected ? icon("check") : ""}${hasProbabilities ? `<span class="choice-percent">${percent}%</span>` : ""}${icon("chevron")}</summary><p class="choice-description">${escapeHTML(choice.description)}</p>${hasProbabilities ? `<div class="probability-track" aria-hidden="true"><div class="probability-fill" style="width:${percent}%"></div></div>` : ""}</details>`;
+  }).join("");
+  const date = new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "long", day: "numeric" }).format(record.createdAt);
+  $("#journey").hidden = true;
   $("#result").hidden = false;
-  $("#result").innerHTML =
-    `<article class="answer-card"><div class="answer-top"><div class="answer-meta"><span>02 / YOUR NEXT CHAPTER</span><span class="answer-badge">${icon("sparkles")}Jev 的选择</span></div><h2>${escapeHTML(chosen.title)}</h2><p class="answer-question">关于「${escapeHTML(record.question)}」</p></div><div class="answer-content"><p class="answer-explanation">${escapeHTML(decision.explanation)}</p><div class="choice-list">${options.choices
-      .map((choice, index) => {
-        const selected = choice.id === decision.choiceId;
-        const percent = hasProbabilities
-          ? Math.round(decision.probabilities[choice.id] * 1000) / 10
-          : null;
-        return `<div class="choice-row ${selected ? "chosen" : ""}"><div class="choice-title"><span class="choice-letter">${String.fromCharCode(65 + index)}</span><b>${escapeHTML(choice.title)}</b>${selected ? icon("check") : ""}${hasProbabilities ? `<span class="choice-percent">${percent}%</span>` : ""}</div><p class="choice-description">${escapeHTML(choice.description)}</p>${hasProbabilities ? `<div class="probability-track" aria-hidden="true"><div class="probability-fill" style="width:${percent}%"></div></div>` : ""}</div>`;
-      })
-      .join(
-        "",
-      )}</div><p class="probability-note">${hasProbabilities ? "百分比表示模型在这些选项中的倾向，不代表事情发生的概率。" : "本次服务未提供概率分布，已保留 Jev 返回的选择。"}${decision.explanationUnavailable ? " 本次解读暂不可用。" : ""}</p><div class="answer-actions"><button class="secondary-button ${record.favorite ? "is-saved" : ""}" data-action="favorite-current" aria-pressed="${!!record.favorite}">${icon("bookmark")}${record.favorite ? "已收藏" : "收藏启示"}</button><button class="secondary-button" data-action="copy">${icon("copy")}复制答案</button><button class="secondary-button" data-action="new">再问一题${icon("arrow")}</button></div></div></article>`;
+  $("#result").innerHTML = `
+    <div class="reader-book">
+      <aside class="reader-context" aria-label="这一页的问题">
+        <div class="reader-context-top"><span class="section-kicker">A MOMENT OF CLARITY</span><span class="reader-ribbon" aria-hidden="true">✧</span></div>
+        <div class="reader-dedication"><h3>写给，<br>正在犹豫的你。</h3><p>把问题留在这一页，让下一步清晰一点。</p></div>
+        <blockquote class="reader-question">${escapeHTML(record.question.length > 160 ? `${record.question.slice(0, 160)}…` : record.question)}</blockquote>
+        ${record.question.length > 160 ? `<details class="reader-question-details"><summary>阅读完整问题</summary><p>${escapeHTML(record.question)}</p></details>` : ""}
+        <div class="reader-context-bottom"><span>${escapeHTML(categories[record.category] || "日常小事")}${recordSupplements(record).length ? ` · 已结合 ${recordSupplements(record).length} 条补充` : ""}</span><time datetime="${new Date(record.createdAt).toISOString()}">${date}</time><span class="reader-ornament" aria-hidden="true">— ✧ —</span></div>
+      </aside>
+      <div class="reader-page">
+        <div class="reader-tabs" role="tablist" aria-label="翻阅答案">${tabs.map(([tab, label], index) => `<button type="button" role="tab" id="reader-tab-${tab}" class="reader-tab" data-reader-tab="${tab}" aria-controls="reader-panel-${tab}" aria-selected="false" tabindex="-1"><span class="reader-tab-number">0${index + 1}</span>${label}</button>`).join("")}</div>
+        <div class="reader-panels">
+          <section id="reader-panel-answer" class="reader-panel reader-scroll" data-reader-panel="answer" role="tabpanel" aria-labelledby="reader-tab-answer" tabindex="0">
+            <div class="reader-answer-kicker">${icon("sparkles")}Jev 为你翻到的答案</div>
+            <h3 class="reader-answer-title">${escapeHTML(chosen.title)}</h3>
+            <p class="reader-answer-description">${escapeHTML(chosen.description)}</p>
+            <div class="reader-divider" aria-hidden="true">✦</div>
+            <p class="reader-explanation">${formatProse(decision.explanation)}</p>
+            ${decision.explanationUnavailable ? '<p class="probability-note">本次解读暂不可用，Jev 的选择已保留。</p>' : ""}
+            <p class="reader-gentle-note">答案是启发，选择始终在你。</p>
+          </section>
+          <section id="reader-panel-choices" class="reader-panel reader-scroll" data-reader-panel="choices" role="tabpanel" aria-labelledby="reader-tab-choices" tabindex="0" hidden>
+            <h3 class="reader-panel-heading">每一种可能，都值得看见。</h3><p class="reader-panel-intro">点开卡片，看看每个方向意味着什么。</p>
+            <div class="choice-list">${choices}</div><p class="probability-note">${hasProbabilities ? "百分比表示模型对这些选项的相对倾向，不是现实中的成功率。" : "本次服务未提供概率分布，已保留 Jev 返回的选择。"}</p>
+          </section>
+          <section id="reader-panel-followup" class="reader-panel" data-reader-panel="followup" role="tabpanel" aria-labelledby="reader-tab-followup" hidden>
+            <div class="followup-pagination" aria-label="追问卡片翻页"><button type="button" class="icon-button" data-followup-page="-1" aria-label="上一条追问">${icon("chevron")}</button><span id="followup-page-label" aria-live="polite"></span><button type="button" class="icon-button" data-followup-page="1" aria-label="下一条追问">${icon("chevron")}</button></div>
+            <div id="followup-messages" class="followup-messages" aria-live="polite" tabindex="0" aria-label="当前追问内容"></div>
+            <div class="followup-suggestions"><button type="button" data-followup="为什么更推荐这个选择？有哪些需要留意的地方？">为什么这样选？</button><button type="button" data-followup="如果决定这样做，我可以从哪些具体的小步骤开始？">该怎么开始？</button><button type="button" data-followup="从另一个角度看，还有什么可能被忽略的因素？">换个角度</button></div>
+            <form id="followup-form"><label class="sr-only" for="followup-input">继续追问</label><textarea id="followup-input" rows="2" maxlength="1000" placeholder="带着这一页答案，继续聊聊…"></textarea><div class="followup-form-bottom"><span>AI 解读 · 参考最近 6 轮对话</span><button type="submit" class="primary-button" id="followup-send">继续追问${icon("arrow")}</button></div></form><div id="followup-error" class="form-error" role="alert" hidden></div>
+          </section>
+          <section id="reader-panel-supplement" class="reader-panel reader-scroll" data-reader-panel="supplement" role="tabpanel" aria-labelledby="reader-tab-supplement" tabindex="0" hidden></section>
+        </div>
+      </div>
+      ${openingNewPage ? '<div class="reader-opening-cover" aria-hidden="true"><span>THE BOOK OF ANSWERS</span><strong>答案之书</strong><i>✧</i><small>每一页，都是一种可能</small></div>' : ""}
+    </div>
+    <footer class="reader-footer"><div class="reader-page-marker"><span id="reader-page-number">01 / 04</span><small>慢慢读，不必急着决定</small></div><div class="reader-actions"><button type="button" class="secondary-button ${record.favorite ? "is-saved" : ""}" data-action="favorite-current" aria-pressed="${!!record.favorite}">${icon("bookmark")}${record.favorite ? "已收藏" : "收藏启示"}</button><button type="button" class="secondary-button" data-action="copy">${icon("copy")}复制答案</button><button type="button" class="secondary-button" data-action="new">再问一题${icon("arrow")}</button></div></footer>`;
   renderSupplement(record);
-  $("#result").insertAdjacentHTML(
-    "beforeend",
-    `<section class="followup-panel" aria-labelledby="followup-heading"><div class="section-heading"><div><span class="section-kicker">03 / GO A LITTLE DEEPER</span><h2 id="followup-heading">一个答案，也可以是对话的开始</h2></div><span class="followup-symbol">✧</span></div><p class="followup-intro">为什么这样选，下一步怎么做？带着刚才的答案，我们继续聊。</p><div id="followup-messages" class="followup-messages" aria-live="polite"></div><div class="followup-suggestions"><button type="button" data-followup="为什么更推荐这个选择？有哪些需要留意的地方？">为什么这样选？</button><button type="button" data-followup="如果决定这样做，我可以从哪些具体的小步骤开始？">具体该怎么开始？</button><button type="button" data-followup="从另一个角度看，还有什么可能被忽略的因素？">换个角度想一想</button></div><form id="followup-form"><label class="sr-only" for="followup-input">继续追问</label><textarea id="followup-input" rows="2" maxlength="1000" placeholder="继续追问，或补充一点新的想法…"></textarea><div class="followup-form-bottom"><span>会参考原问题与最近 6 轮对话</span><button type="submit" class="primary-button" id="followup-send">继续追问${icon("arrow")}</button></div></form><div id="followup-error" class="form-error" role="alert" hidden></div></section>`,
-  );
+  $("#followup-input").value = state.followupDrafts.get(record.id) || "";
   renderFollowups(record);
+  showReaderTab(state.readerTab);
+  updateReaderResume();
 }
 
 function validFollowups(record) {
@@ -511,17 +582,20 @@ function validFollowups(record) {
 function renderFollowups(record, pendingQuestion) {
   const container = $("#followup-messages");
   if (!container) return;
-  container.innerHTML = validFollowups(record)
-    .map(
-      (message, index) =>
-        `<div class="followup-turn"><div class="chat-question"><span>你的追问 · ${index + 1}</span><p>${escapeHTML(message.question)}</p></div><div class="chat-answer"><span>${icon("sparkles")}答案之书 · AI 解读</span><p>${formatProse(message.answer)}</p></div></div>`,
-    )
-    .join("");
-  if (pendingQuestion)
-    container.insertAdjacentHTML(
-      "beforeend",
-      `<div class="followup-turn"><div class="chat-question"><span>你的追问</span><p>${escapeHTML(pendingQuestion)}</p></div><div class="chat-answer chat-thinking"><span class="spinner"></span>正在结合前面的对话思考…<button type="button" class="text-button" data-action="cancel">取消</button></div></div>`,
-    );
+  const messages = validFollowups(record);
+  const total = messages.length + (pendingQuestion ? 1 : 0);
+  state.followupPage = Math.max(0, Math.min(state.followupPage, total - 1));
+  const message = messages[state.followupPage];
+  $("#followup-page-label").textContent = total ? `追问 ${state.followupPage + 1} / ${total}` : "这一页，留给你的追问";
+  $("[data-followup-page='-1']").disabled = state.followupPage === 0;
+  $("[data-followup-page='1']").disabled = state.followupPage >= total - 1;
+  // 每次只渲染当前一轮，翻页不会让整个页面继续变长。
+  container.innerHTML = message
+    ? `<div class="followup-turn"><div class="chat-question"><span>你的追问 · ${state.followupPage + 1}</span><p>${escapeHTML(message.question)}</p></div><div class="chat-answer"><span>${icon("sparkles")}答案之书 · AI 解读</span><p>${formatProse(message.answer)}</p></div></div>`
+    : pendingQuestion
+      ? `<div class="followup-turn"><div class="chat-question"><span>你的追问</span><p>${escapeHTML(pendingQuestion)}</p></div><div class="chat-answer chat-thinking"><span class="spinner"></span>正在结合前面的对话思考…<button type="button" class="text-button" data-action="cancel">取消</button></div></div>`
+      : `<div class="reader-chat-empty">${icon("book-open")}<h3>一个答案，也可以是对话的开始。</h3><p>为什么这样选，下一步怎么做？<br>你的每次追问，都会成为一张新的卡片。</p></div>`;
+  container.scrollTop = 0;
 }
 async function askFollowup(event) {
   event?.preventDefault();
@@ -548,8 +622,10 @@ async function askFollowup(event) {
   $$("[data-followup]").forEach((button) => {
     button.disabled = true;
   });
+  state.pendingFollowup = followUp;
+  state.followupPage = validFollowups(record).length;
+  state.followupDrafts.set(record.id, input.value);
   renderFollowups(record, followUp);
-  $("#followup-form").scrollIntoView({ behavior: "smooth", block: "nearest" });
   try {
     // 最近六轮用于模型上下文，完整可见对话保留最近二十轮并随答案存储。
     const { answer } = await api("/api/book/follow-up", {
@@ -569,6 +645,9 @@ async function askFollowup(event) {
       ...validFollowups(record),
       { question: followUp, answer },
     ].slice(-20);
+    state.pendingFollowup = null;
+    state.followupPage = record.followups.length - 1;
+    state.followupDrafts.delete(record.id);
     persistRecords();
     renderFollowups(record);
     input.value = "";
@@ -577,6 +656,7 @@ async function askFollowup(event) {
       toast("追问解读已完成，已保存到这条答案。");
     }
   } catch (error) {
+    state.pendingFollowup = null;
     renderFollowups(record);
     if (controller.signal.aborted) toast("已取消等待，追问内容已保留。");
     else
@@ -606,7 +686,13 @@ function toggleFavorite(id) {
   persistRecords();
   if (state.current?.id === id) {
     state.current = record;
-    renderResult(record);
+    // 收藏只更新按钮，保留输入、展开状态、阅读位置和键盘焦点。
+    const button = $("[data-action='favorite-current']");
+    if (button) {
+      button.classList.toggle("is-saved", record.favorite);
+      button.setAttribute("aria-pressed", String(record.favorite));
+      button.innerHTML = `${icon("bookmark")}${record.favorite ? "已收藏" : "收藏启示"}`;
+    }
   }
   if (state.view !== "home") renderHistory();
   toast(
@@ -652,6 +738,8 @@ function newQuestion() {
   state.current = null;
   state.pending = null;
   state.supplementOpen = null;
+  state.readerRecordId = null;
+  closeReader();
   $("#result").hidden = true;
   $("#journey").hidden = true;
   $("#question").value = "";
@@ -659,6 +747,7 @@ function newQuestion() {
   showError("#form-error", "");
   setView("home");
   $("#question").focus();
+  updateReaderResume();
 }
 async function copyAnswer() {
   const record = state.current;
@@ -681,7 +770,7 @@ async function copyAnswer() {
     const textarea = document.createElement("textarea");
     textarea.value = text;
     textarea.style.cssText = "position:fixed;top:0;left:-9999px";
-    document.body.append(textarea);
+    ($("#reader-dialog").open ? $(".reader-shell") : document.body).append(textarea);
     textarea.select();
     let copied = false;
     try {
@@ -853,13 +942,13 @@ document.addEventListener("click", (event) => {
   if (button.dataset.favorite) toggleFavorite(button.dataset.favorite);
   if (button.dataset.followup) {
     $("#followup-input").value = button.dataset.followup;
+    if (state.current) state.followupDrafts.set(state.current.id, button.dataset.followup);
     $("#followup-input").focus();
   }
-  if (button.dataset.action === "supplement") openSupplement();
-  if (button.dataset.action === "close-supplement") {
-    state.supplementOpen = null;
-    $("#supplement-panel").hidden = true;
-    $("[data-action='supplement']")?.setAttribute("aria-expanded", "false");
+  if (button.dataset.readerTab) showReaderTab(button.dataset.readerTab);
+  if (button.dataset.followupPage && state.current) {
+    state.followupPage += Number(button.dataset.followupPage);
+    renderFollowups(state.current, state.pendingFollowup);
   }
   if (button.dataset.record) {
     if (state.busy) {
@@ -877,7 +966,7 @@ document.addEventListener("click", (event) => {
       selectCategory(record.category);
       $("#journey").hidden = true;
       renderResult(record);
-      $("#result").scrollIntoView({ behavior: "smooth", block: "start" });
+      openReader();
     }
   }
   if (button.dataset.delete) {
@@ -901,13 +990,25 @@ document.addEventListener("click", (event) => {
     );
     if (state.current?.id === button.dataset.delete) {
       state.current = null;
+      state.pending = null;
+      state.readerRecordId = null;
       $("#result").hidden = true;
+      updateReaderResume();
     }
     persistRecords();
     renderHistory();
     toast("已删除这一条答案。");
   }
   const action = button.dataset.action;
+  if (action === "resume-reader") openReader();
+  if (action === "close-reader") {
+    closeReader();
+    $("#question").focus();
+  }
+  if (action === "back-to-answer" && state.current) {
+    state.pending = null;
+    renderResult(state.current);
+  }
   if (action === "settings") openSettings();
   if (action === "cancel") state.controller?.abort();
   if (action === "retry") {
@@ -940,6 +1041,11 @@ $(".brand").addEventListener("click", (event) => {
   setView("home");
 });
 $("#question-form").addEventListener("submit", askQuestion);
+$("#close-reader").addEventListener("click", closeReader);
+$("#reader-dialog").addEventListener("close", () => {
+  document.body.append($("#toast"));
+  updateReaderResume();
+});
 document.addEventListener("submit", (event) => {
   if (event.target.id === "followup-form") askFollowup(event);
   if (event.target.id === "supplement-form") askSupplement(event);
@@ -948,8 +1054,20 @@ document.addEventListener("input", (event) => {
   if (event.target.id === "supplement-input" && state.current) {
     state.supplementDrafts.set(state.current.id, event.target.value);
   }
+  if (event.target.id === "followup-input" && state.current) {
+    state.followupDrafts.set(state.current.id, event.target.value);
+  }
 });
 document.addEventListener("keydown", (event) => {
+  // 标准页签键盘行为：左右键切页，Home / End 到首尾，Tab 进入当前内容。
+  if (event.target.matches("[data-reader-tab]") && ["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+    event.preventDefault();
+    const tabs = $$("[data-reader-tab]");
+    const index = tabs.indexOf(event.target);
+    const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+    showReaderTab(tabs[next].dataset.readerTab, true);
+    return;
+  }
   if (event.target.id === "supplement-input" && (event.ctrlKey || event.metaKey) && event.key === "Enter") {
     askSupplement(event);
     return;
