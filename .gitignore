@@ -3,3 +3,12 @@ data/config.json
 *.log
 .env
 .env.*
+.wrangler/
+.dev.vars
+
+# 示例不含真实凭据，可以提交；本地 Cloudflare 密钥文件必须忽略。
+!.env.example
+.dev.vars.*
+
+# 浏览器调试工具产生的临时快照与控制台日志，不属于项目源码。
+.playwright-mcp/
