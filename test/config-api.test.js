@@ -4,13 +4,14 @@ import { mkdtemp, readFile, unlink, rmdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createConfigStore, DEFAULT_CONFIG, mergeConfig, publicConfig, deepMerge } from '../src/config-store.js';
+import { createKvConfigStore } from '../src/config-kv.js';
 import { createApp } from '../src/app.js';
 import { createBookService } from '../src/book.js';
 
 // 全部测试使用虚构凭据与临时目录，不读取或修改 data/config.json。
 const testConfig = () => mergeConfig(structuredClone(DEFAULT_CONFIG), {
   llm: { apiKey: 'test-only-llm-key', baseURL: 'https://example.test/v1', model: 'test-model' },
-  jev: { vercel: { apiKey: 'test-only-jev-key' } },
+  jev: { provider: 'vercel', vercel: { apiKey: 'test-only-jev-key' } },
 });
 const post = (path, body) => new Request(`http://localhost${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
@@ -64,6 +65,35 @@ test('配置持久化与并发部分保存保留密钥，读取结果无法修�
   }
 });
 
+function memoryKv(initial = null) {
+  const data = new Map();
+  if (initial != null) data.set('config', initial);
+  return {
+    async get(key) {
+      return data.has(key) ? data.get(key) : null;
+    },
+    async put(key, value) {
+      data.set(key, value);
+    },
+  };
+}
+
+test('KV 配置持久化与损坏数据不会被默认配置静默覆盖', async () => {
+  const kv = memoryKv();
+  const store = createKvConfigStore(kv);
+  await store.saveConfig(testConfig());
+  await Promise.all([store.saveConfig({ llm: { model: 'updated' } }), store.saveConfig({ jev: { provider: 'typesafe' } })]);
+  const actual = await store.readConfig();
+  assert.equal(actual.llm.model, 'updated');
+  assert.equal(actual.jev.provider, 'typesafe');
+  assert.equal(actual.llm.apiKey, 'test-only-llm-key');
+  assert.equal(JSON.parse(await kv.get('config')).llm.apiKey, 'test-only-llm-key');
+
+  const broken = memoryKv('{broken');
+  await assert.rejects(createKvConfigStore(broken).saveConfig({ llm: { model: 'new' } }));
+  assert.equal(await broken.get('config'), '{broken');
+});
+
 test('损坏配置不会被默认配置静默覆盖', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'answer-book-invalid-'));
   const path = join(directory, 'config.json');
@@ -78,23 +108,15 @@ test('损坏配置不会被默认配置静默覆盖', async () => {
   }
 });
 
-test('配置 GET/POST 响应从不包含密钥，模型列表空密钥沿用已配置值', async () => {
-  let current = testConfig();
-  const app = createApp({
-    readConfig: async () => current,
-    saveConfig: async (patch) => (current = mergeConfig(current, patch)),
-    listModels: async (llm) => { assert.equal(llm.apiKey, 'test-only-llm-key'); return ['test-model']; },
-  });
-  for (const request of [new Request('http://localhost/api/config'), post('/api/config', { llm: { apiKey: '', model: 'changed' } })]) {
-    const response = await app.fetch(request);
-    assert.equal(response.status, 200);
-    const text = await response.text();
-    assert.equal(text.includes('test-only'), false);
-    assert.equal(JSON.parse(text).config.llm.apiKeyConfigured, true);
-    assert.equal(response.headers.get('cache-control'), 'no-store');
+test('访客只能读取就绪状态，旧配置和调试接口全部关闭', async () => {
+  const app = createApp({ readConfig: async () => testConfig() });
+  const response = await app.fetch(new Request('http://localhost/api/status'));
+  assert.deepEqual(await response.json(), { ok: true, ready: true });
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  for (const path of ['/api/config', '/api/models', '/api/gen-params', '/api/jev', '/api/explain']) {
+    assert.equal((await app.fetch(post(path, { llm: { baseURL: 'https://attacker.test' } }))).status, 404);
+    assert.equal((await app.fetch(new Request(`http://localhost${path}`))).status, 404);
   }
-  const models = await app.fetch(post('/api/models', { llm: { apiKey: '' } }));
-  assert.deepEqual((await models.json()).models, ['test-model']);
 });
 
 test('新路由返回合同结构，字段与请求体超限返回客户端错误', async () => {
@@ -124,7 +146,7 @@ test('新路由返回合同结构，字段与请求体超限返回客户端错�
 
 test('内部异常不在 API 响应中暴露服务凭据', async () => {
   const app = createApp({ readConfig: async () => { throw new Error('test-only-private-key'); } });
-  const response = await app.fetch(new Request('http://localhost/api/config'));
+  const response = await app.fetch(new Request('http://localhost/api/status'));
   assert.equal(response.status, 500);
   assert.equal((await response.text()).includes('test-only-private-key'), false);
 });

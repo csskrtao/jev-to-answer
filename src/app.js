@@ -1,8 +1,6 @@
 import { H3, readBody, assertBodySize } from 'h3';
-import { readConfig, saveConfig, mergeConfig, mergeConnection, publicConfig } from './config-store.js';
-import { listModels, generateJevParams, explainResult } from './llm.js';
-import { runEvaluate } from './jev.js';
-import { serveStatic } from './static.js';
+import { DEFAULT_CONFIG } from './config.js';
+import { isServiceReady } from './runtime-config.js';
 import { createBookService } from './book.js';
 
 /** JSON 请求限制为 64 KiB，先限制字节数再进行字段校验。 */
@@ -24,6 +22,7 @@ function wrap(fn) {
   return async (event) => {
     try {
       const data = await fn(event);
+      if (data instanceof Response) return data;
       return new Response(JSON.stringify({ ok: true, ...data }), {
         headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
       });
@@ -31,7 +30,7 @@ function wrap(fn) {
       const code = err?.status ?? err?.statusCode;
       const status = Number.isInteger(code) && code >= 400 && code <= 599 ? code : 500;
       // 上游异常可能携带响应正文，不把内部配置或服务细节回显到浏览器。
-      const message = status === 500 ? '服务请求未完成，请检查模型配置或稍后重试' : err?.message || '请求未完成';
+      const message = status >= 500 ? '服务暂时不可用，请稍后重试' : err?.message || '请求未完成';
       return new Response(JSON.stringify({ ok: false, error: message }), {
         status,
         headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
@@ -42,81 +41,51 @@ function wrap(fn) {
 
 export function createApp(dependencies = {}) {
   const app = new H3();
-  const getConfig = dependencies.readConfig ?? readConfig;
-  const setConfig = dependencies.saveConfig ?? saveConfig;
-  const getModels = dependencies.listModels ?? listModels;
+  const getConfig = dependencies.readConfig ?? (async () => structuredClone(DEFAULT_CONFIG));
   const book = dependencies.bookService ?? createBookService();
+  const staticHandler = dependencies.serveStatic;
 
-  // 读取配置(GET /api/config)
-  app.get('/api/config', wrap(async () => ({ config: publicConfig(await getConfig()) })));
+  // 访客只知道服务是否就绪，不接收服务地址、模型名称或任何凭据。
+  app.get('/api/status', wrap(async () => ({ ready: isServiceReady(await getConfig()) })));
 
-  // 保存配置(POST /api/config)
-  app.post('/api/config', wrap(async (event) => {
+  async function prepare(event) {
     const body = await readInput(event);
-    const config = await setConfig({ llm: body?.llm, jev: body?.jev });
-    return { config: publicConfig(config) };
-  }));
-
-  // 获取模型列表:用已保存的 LLM 配置或请求中携带的配置
-  app.post('/api/models', wrap(async (event) => {
-    const body = await readInput(event);
+    // 拒绝旧客户端的连接覆盖，防止把服务端密钥发送到访客指定的地址。
+    if (['llm', 'jev', 'baseURL', 'apiKey', 'model'].some((key) => Object.hasOwn(body, key))) {
+      throw Object.assign(new Error('访客不能修改模型连接配置'), { status: 400 });
+    }
     const config = await getConfig();
-    const llm = mergeConnection(config.llm, body?.llm ?? {});
-    const models = await getModels(llm);
-    return { models };
-  }));
-
-  // 根据用户需求生成 Jev 参数 { state, questions }
-  app.post('/api/gen-params', wrap(async (event) => {
-    const body = await readInput(event);
-    const config = await getConfig();
-    const llm = mergeConnection(config.llm, body?.llm ?? {});
-    const need = String(body?.need ?? '').trim();
-    if (!need) throw Object.assign(new Error('请输入评估需求'), { status: 400 });
-    const params = await generateJevParams(llm, need);
-    return { params };
-  }));
-
-  // 调用 Jev:body { state, questions } + 可选 jev 配置覆盖
-  app.post('/api/jev', wrap(async (event) => {
-    const body = await readInput(event);
-    const config = await getConfig();
-    const jev = mergeConfig(config, { jev: body?.jev ?? {} }).jev;
-    const result = await runEvaluate(jev, body);
-    return { result };
-  }));
-
-  // 用 LLM 解释 Jev 调用结果
-  app.post('/api/explain', wrap(async (event) => {
-    const body = await readInput(event);
-    const config = await getConfig();
-    const llm = mergeConnection(config.llm, body?.llm ?? {});
-    const need = String(body?.need ?? '');
-    const text = await explainResult(llm, need, body?.result);
-    return { text };
-  }));
+    if (!isServiceReady(config)) throw Object.assign(new Error('服务暂未就绪，请稍后再试'), { status: 503 });
+    const limited = await dependencies.checkQuota?.(event);
+    return { body, config, limited };
+  }
 
   // 两阶段接口用于展示选项生成进度，网页拿到候选后自动交给 Jev。
   app.post('/api/book/options', wrap(async (event) => {
-    const body = await readInput(event);
-    return { options: await book.options(await getConfig(), body) };
+    const { body, config, limited } = await prepare(event);
+    return limited || { options: await book.options(config, body) };
   }));
   app.post('/api/book/decide', wrap(async (event) => {
-    const body = await readInput(event);
-    return { decision: await book.decide(await getConfig(), body) };
+    const { body, config, limited } = await prepare(event);
+    return limited || { decision: await book.decide(config, body) };
   }));
   app.post('/api/book/follow-up', wrap(async (event) => {
-    const body = await readInput(event);
-    return { answer: await book.followUp(await getConfig(), body) };
+    const { body, config, limited } = await prepare(event);
+    return limited || { answer: await book.followUp(config, body) };
   }));
 
-  // 静态资源(public/)
-  app.all('/**', async (event) => {
-    const pathname = event.path || '/';
-    const res = await serveStatic(event, pathname);
-    if (res) return res;
-    return new Response('Not Found', { status: 404 });
-  });
+  // 旧配置、调试以及未知 API 一律关闭，不能落入静态页面。
+  app.all('/api/**', () => new Response('Not Found', { status: 404 }));
+
+  // 静态资源由本地 server 注入；Cloudflare 使用 Workers Assets，不必走这层。
+  if (typeof staticHandler === 'function') {
+    app.all('/**', async (event) => {
+      const pathname = event.path || '/';
+      const res = await staticHandler(event, pathname);
+      if (res) return res;
+      return new Response('Not Found', { status: 404 });
+    });
+  }
 
   return app;
 }

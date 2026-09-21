@@ -13,7 +13,11 @@ const choices = [
 ];
 const generated = { state: { context: '安排周末' }, choices };
 const result = { answers: { decision: { type: 'choice', choice: 'option_b', probabilities: { option_a: 0.2, option_b: 0.8 } } } };
+// 只使用测试凭据，满足公共接口的服务就绪检查。
 const config = structuredClone(DEFAULT_CONFIG);
+config.llm.baseURL = 'https://example.test/v1';
+config.llm.model = 'test-model';
+config.jev.typesafe.apiKey = 'test-only-key';
 
 test('全部补充贯穿生成选项、Jev 选择、解读和继续追问，原问题保持独立', async () => {
   const calls = {};

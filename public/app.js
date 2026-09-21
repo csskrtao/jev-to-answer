@@ -9,8 +9,6 @@ const paths = {
   bookmark: "M6 3h12v18l-6-4-6 4z",
   arrow: "M4 12h16 M14 6l6 6-6 6",
   chevron: "m9 5 7 7-7 7",
-  settings:
-    "m9 3-1 3-3 1-2 3 2 3v3l3 2 3-1 3 1 3-2v-3l2-3-2-3-3-1-1-3z M15 11a3 3 0 1 1-6 0 3 3 0 0 1 6 0",
   pen: "m15 4 5 5 M4 20l5-1L21 7a2 2 0 0 0-5-5L4 14z M4 14l5 5",
   coffee:
     "M4 8h12v8a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4z M16 9h2a3 3 0 0 1 0 6h-2 M7 2v3 M12 2v3 M2 23h18",
@@ -124,6 +122,24 @@ const promptSets = [
 ];
 const HISTORY_KEY = "answer-book:history:v1";
 const DRAFT_KEY = "answer-book:draft:v1";
+// 旧历史没有 kind，仍按决策记录读取；直接回答不伪造选项和 Jev 决策。
+const isDirect = (record) => record?.options?.kind === "direct";
+const answerTitle = (record) => isDirect(record)
+  ? record.options.title
+  : record.options.choices.find((choice) => choice.id === record.decision.choiceId)?.title || "答案";
+const answerBody = (record) => isDirect(record) ? record.options.answer : record.decision.explanation;
+function validAnswerRecord(record) {
+  if (isDirect(record)) {
+    return ["evaluation", "fact", "chat", "clarification"].includes(record.options.intent) &&
+      typeof record.options.title === "string" && typeof record.options.answer === "string";
+  }
+  return Array.isArray(record.options?.choices) && record.options.choices.length >= 2 &&
+    record.options.choices.every((choice) => typeof choice?.id === "string" &&
+      typeof choice.title === "string" && typeof choice.description === "string") &&
+    record.options.choices.some((choice) => choice.id === record.decision?.choiceId) &&
+    record.decision.probabilities && typeof record.decision.probabilities === "object" &&
+    typeof record.decision.explanation === "string";
+}
 // 手机通过局域网 HTTP 访问时 randomUUID 可能不可用；记录 ID 不承担鉴权用途。
 const createRecordId = () =>
   globalThis.crypto?.randomUUID?.() ||
@@ -133,8 +149,7 @@ const state = {
   view: "home",
   busy: false,
   followupBusy: false,
-  config: null,
-  settingsDraft: null,
+  ready: null,
   promptIndex: 0,
   current: null,
   pending: null,
@@ -186,7 +201,7 @@ async function api(path, { body, signal, timeout = 125000 } = {}) {
   try {
     data = await response.json();
   } catch {
-    throw new Error("服务暂时没有响应，请确认本地服务已启动。");
+    throw new Error("服务暂时没有响应，请稍后再试。");
   }
   if (!response.ok || !data.ok)
     throw new Error(data.error || "这次请求没有完成，请稍后重试。");
@@ -196,7 +211,7 @@ function readableError(error) {
   if (error.name === "TimeoutError")
     return "这次思考花的时间有点久，请稍后重试，或检查模型服务是否可用。";
   if (error instanceof TypeError)
-    return "暂时连不上服务，请检查网络和本地服务是否正常运行。";
+    return "暂时连不上服务，请检查网络或稍后再试。";
   return String(error.message || "暂时没有得到答案，请重试。").slice(0, 500);
 }
 
@@ -210,20 +225,7 @@ function restoreLocalData() {
           (record) =>
             typeof record?.id === "string" &&
             typeof record.question === "string" &&
-            Array.isArray(record.options?.choices) &&
-            record.options.choices.length >= 2 &&
-            record.options.choices.every(
-              (choice) =>
-                typeof choice?.id === "string" &&
-                typeof choice.title === "string" &&
-                typeof choice.description === "string",
-            ) &&
-            record.options.choices.some(
-              (choice) => choice.id === record.decision?.choiceId,
-            ) &&
-            record.decision.probabilities &&
-            typeof record.decision.probabilities === "object" &&
-            typeof record.decision.explanation === "string" &&
+            validAnswerRecord(record) &&
             Number.isFinite(record.createdAt),
         )
         .slice(0, 100);
@@ -345,6 +347,7 @@ function closeReader() {
 }
 function showReaderTab(tab, focus = false) {
   if (!["answer", "choices", "followup", "supplement"].includes(tab)) return;
+  if (isDirect(state.current) && tab === "choices") tab = "answer";
   state.readerTab = tab;
   state.supplementOpen = tab === "supplement" ? state.current?.id : null;
   $$("[data-reader-tab]").forEach((button) => {
@@ -356,15 +359,16 @@ function showReaderTab(tab, focus = false) {
   $$("[data-reader-panel]").forEach((panel) => {
     panel.hidden = panel.dataset.readerPanel !== tab;
   });
-  const index = ["answer", "choices", "followup", "supplement"].indexOf(tab);
-  if ($("#reader-page-number")) $("#reader-page-number").textContent = `0${index + 1} / 04`;
+  const tabs = $$("[data-reader-tab]");
+  const index = tabs.findIndex((button) => button.dataset.readerTab === tab);
+  if ($("#reader-page-number")) $("#reader-page-number").textContent = `0${index + 1} / 0${tabs.length}`;
 }
 function renderJourney(phase, options, error) {
   const element = $("#journey");
   const failed = phase === "error";
   element.hidden = false;
   $("#result").hidden = true;
-  element.innerHTML = `<div class="journey-book" aria-hidden="true"><span></span><span></span></div><span class="journey-kicker">A NEW CHAPTER IS WAITING</span><div class="journey-top">${failed ? icon("info") : '<span class="spinner"></span>'}<div><h3>${failed ? "答案还差最后一步" : phase === "options" ? "把纠结，整理成几种可能…" : "这一页，正在为你慢慢翻开…"}</h3><p>${failed ? escapeHTML(error) : phase === "options" ? "AI 正在阅读你的问题，寻找值得尝试的方向。" : "Jev 正在认真权衡，为你选出一个方向。"}</p></div></div>${options ? `<ul class="journey-options">${options.choices.map((choice, index) => `<li><small>${String.fromCharCode(65 + index)}</small>${escapeHTML(choice.title)}</li>`).join("")}</ul>` : ""}<div class="journey-progress" aria-label="生成进度"><span class="${options ? "is-complete" : "is-current"}">01 整理可能</span><span class="${options ? "is-current" : ""}">02 翻开答案</span></div><div class="journey-actions">${failed ? '<button class="secondary-button" data-action="retry">' + icon("refresh") + '重试这一步</button><button class="text-button" data-action="settings">检查模型设置</button><button class="text-button" data-action="' + (state.current ? "back-to-answer" : "close-reader") + '">' + (state.current ? "返回原答案" : "返回修改问题") + '</button>' : '<button class="text-button" data-action="cancel">取消等待</button>'}</div>`;
+  element.innerHTML = `<div class="journey-book" aria-hidden="true"><span></span><span></span></div><span class="journey-kicker">A NEW CHAPTER IS WAITING</span><div class="journey-top">${failed ? icon("info") : '<span class="spinner"></span>'}<div><h3>${failed ? "答案还差最后一步" : phase === "options" ? "正在理解你的问题…" : "这一页，正在为你慢慢翻开…"}</h3><p>${failed ? escapeHTML(error) : phase === "options" ? "AI 正在识别你的提问，组织贴题的回答。" : "Jev 正在认真权衡，为你选出一个方向。"}</p></div></div>${options?.choices ? `<ul class="journey-options">${options.choices.map((choice, index) => `<li><small>${String.fromCharCode(65 + index)}</small>${escapeHTML(choice.title)}</li>`).join("")}</ul>` : ""}<div class="journey-progress" aria-label="生成进度"><span class="${options ? "is-complete" : "is-current"}">01 理解问题</span><span class="${options ? "is-current" : ""}">02 翻开答案</span></div><div class="journey-actions">${failed ? '<button class="secondary-button" data-action="retry">' + icon("refresh") + '重试这一步</button><button class="text-button" data-action="' + (state.current ? "back-to-answer" : "close-reader") + '">' + (state.current ? "返回原答案" : "返回修改问题") + '</button>' : '<button class="text-button" data-action="cancel">取消等待</button>'}</div>`;
 }
 async function askQuestion(event) {
   event?.preventDefault();
@@ -380,9 +384,8 @@ async function askQuestion(event) {
     return;
   }
   showError("#form-error", "");
-  if (state.config && !isConfigured(state.config)) {
-    showError("#form-error", "先连接大模型和 Jev，就可以翻开你的答案。");
-    openSettings();
+  if (state.ready === false) {
+    showError("#form-error", "服务暂未就绪，请等待管理员配置后再试。");
     return;
   }
   state.pending = { question, category: state.category, supplements: [], options: null };
@@ -410,11 +413,15 @@ async function runJourney() {
       });
       pending.options = data.options;
     }
-    renderJourney("decide", pending.options);
-    const { decision } = await api("/api/book/decide", {
-      body: { question: pending.question, supplements: pending.supplements || [], options: pending.options },
-      signal: controller.signal,
-    });
+    let decision = null;
+    // 评价、事实和闲聊已经有直接回复，仅选择问题才进入 Jev。
+    if (pending.options.kind !== "direct") {
+      renderJourney("decide", pending.options);
+      ({ decision } = await api("/api/book/decide", {
+        body: { question: pending.question, supplements: pending.supplements || [], options: pending.options },
+        signal: controller.signal,
+      }));
+    }
     if (controller.signal.aborted) return;
     const record = {
       id: createRecordId(),
@@ -447,7 +454,7 @@ async function runJourney() {
       state.pending = null;
       if (state.current) renderResult(state.current);
       else closeReader();
-      toast(pending.parentId ? "已取消重新选择，原答案和补充内容已保留。" : "已取消等待，可以修改问题再试一次。");
+      toast(pending.parentId ? "已取消重新回答，原答案和补充内容已保留。" : "已取消等待，可以修改问题再试一次。");
     } else renderJourney("error", pending.options, readableError(error));
   } finally {
     setBusy(false);
@@ -464,7 +471,7 @@ function recordSupplements(record) {
 function renderSupplement(record) {
   const supplements = recordSupplements(record);
   const atLimit = supplements.length >= 5;
-  $("#reader-panel-supplement").innerHTML = `<span class="section-kicker">ADD A LITTLE CONTEXT</span><h3 class="reader-panel-heading">让答案，更懂你的处境。</h3><p class="supplement-intro">补充时间、预算或新的顾虑，我们会结合原问题重新选择。原答案和对话会留在「我的答案」中。</p><form id="supplement-form"><label class="sr-only" for="supplement-input">补充信息</label><textarea id="supplement-input" rows="5" maxlength="1000" placeholder="比如：我只有周六下午有空，预算不超过 100 元，希望尽量少走路…" aria-describedby="supplement-hint" ${atLimit ? "disabled" : ""}></textarea><div class="supplement-form-bottom"><span id="supplement-hint">${atLimit ? "已补充 5 次，可以整理信息后再问一题。" : `第 ${supplements.length + 1} 次补充 · 最多 1000 字`}</span><button type="submit" class="primary-button" id="supplement-send" ${atLimit ? "disabled" : ""}>结合补充重新选择${icon("arrow")}</button></div></form><div id="supplement-error" class="form-error" role="alert" hidden></div>${supplements.length ? `<details class="supplement-context"><summary>回看之前的 ${supplements.length} 条补充</summary><ol>${supplements.map((item) => `<li>${escapeHTML(item)}</li>`).join("")}</ol></details>` : ""}`;
+  $("#reader-panel-supplement").innerHTML = `<span class="section-kicker">ADD A LITTLE CONTEXT</span><h3 class="reader-panel-heading">让答案，更懂你的处境。</h3><p class="supplement-intro">${isDirect(record) ? "补充你指的具体事件、对象或想了解的内容，我们会结合原问题重新回答。" : "补充时间、预算或新的顾虑，我们会结合原问题重新选择。"}原答案和对话会留在「我的答案」中。</p><form id="supplement-form"><label class="sr-only" for="supplement-input">补充信息</label><textarea id="supplement-input" rows="5" maxlength="1000" placeholder="${isDirect(record) ? "比如：我指的是这件事，具体发生了…" : "比如：我只有周六下午有空，预算不超过 100 元，希望尽量少走路…"}" aria-describedby="supplement-hint" ${atLimit ? "disabled" : ""}></textarea><div class="supplement-form-bottom"><span id="supplement-hint">${atLimit ? "已补充 5 次，可以整理信息后再问一题。" : `第 ${supplements.length + 1} 次补充 · 最多 1000 字`}</span><button type="submit" class="primary-button" id="supplement-send" ${atLimit ? "disabled" : ""}>${isDirect(record) ? "结合补充重新回答" : "结合补充重新选择"}${icon("arrow")}</button></div></form><div id="supplement-error" class="form-error" role="alert" hidden></div>${supplements.length ? `<details class="supplement-context"><summary>回看之前的 ${supplements.length} 条补充</summary><ol>${supplements.map((item) => `<li>${escapeHTML(item)}</li>`).join("")}</ol></details>` : ""}`;
   $("#supplement-input").value = state.supplementDrafts.get(record.id) || "";
 }
 
@@ -479,9 +486,8 @@ async function askSupplement(event) {
     input.focus();
     return;
   }
-  if (state.config && !isConfigured(state.config)) {
-    showError("#supplement-error", "先连接大模型和 Jev，就可以结合补充重新选择。");
-    openSettings();
+  if (state.ready === false) {
+    showError("#supplement-error", "服务暂未就绪，请等待管理员配置后再试。");
     return;
   }
   showError("#supplement-error", "");
@@ -499,10 +505,11 @@ async function askSupplement(event) {
 
 function renderResult(record) {
   const { options, decision } = record;
-  const chosen = options.choices.find(
+  const direct = isDirect(record);
+  const chosen = direct ? { title: options.title } : options.choices.find(
     (choice) => choice.id === decision.choiceId,
   );
-  const hasProbabilities = options.choices.every(
+  const hasProbabilities = !direct && options.choices.every(
     (choice) =>
       Number.isFinite(decision.probabilities?.[choice.id]) &&
       decision.probabilities[choice.id] >= 0 &&
@@ -515,8 +522,11 @@ function renderResult(record) {
     state.readerTab = "answer";
     state.followupPage = Math.max(0, validFollowups(record).length - 1);
   }
-  const tabs = [["answer", "答案"], ["choices", "其他可能"], ["followup", "继续聊"], ["supplement", "补充条件"]];
-  const choices = options.choices.map((choice, index) => {
+  const tabs = [["answer", "答案"], ...(!direct ? [["choices", "其他可能"]] : []), ["followup", "继续聊"], ["supplement", direct ? "补充信息" : "补充条件"]];
+  const suggestions = direct
+    ? [["能具体解释一下刚才的回答吗？", "展开说说"], ["这个回答的依据是什么？有哪些不能确定的地方？", "依据是什么？"], ["从另一个角度看，还有什么可能被忽略的因素？", "换个角度"]]
+    : [["为什么更推荐这个选择？有哪些需要留意的地方？", "为什么这样选？"], ["如果决定这样做，我可以从哪些具体的小步骤开始？", "该怎么开始？"], ["从另一个角度看，还有什么可能被忽略的因素？", "换个角度"]];
+  const choices = (direct ? [] : options.choices).map((choice, index) => {
     const selected = choice.id === decision.choiceId;
     const percent = hasProbabilities ? Math.round(decision.probabilities[choice.id] * 1000) / 10 : null;
     return `<details class="reader-choice ${selected ? "chosen" : ""}" ${selected ? "open" : ""}><summary class="choice-title"><span class="choice-letter">${String.fromCharCode(65 + index)}</span><b>${escapeHTML(choice.title)}</b>${selected ? icon("check") : ""}${hasProbabilities ? `<span class="choice-percent">${percent}%</span>` : ""}${icon("chevron")}</summary><p class="choice-description">${escapeHTML(choice.description)}</p>${hasProbabilities ? `<div class="probability-track" aria-hidden="true"><div class="probability-fill" style="width:${percent}%"></div></div>` : ""}</details>`;
@@ -528,7 +538,7 @@ function renderResult(record) {
     <div class="reader-book">
       <aside class="reader-context" aria-label="这一页的问题">
         <div class="reader-context-top"><span class="section-kicker">A MOMENT OF CLARITY</span><span class="reader-ribbon" aria-hidden="true">✧</span></div>
-        <div class="reader-dedication"><h3>写给，<br>正在犹豫的你。</h3><p>把问题留在这一页，让下一步清晰一点。</p></div>
+        <div class="reader-dedication"><h3>写给，<br>${direct ? "正在提问的你。" : "正在犹豫的你。"}</h3><p>${direct ? "把问题留在这一页，让想法清晰一点。" : "把问题留在这一页，让下一步清晰一点。"}</p></div>
         <blockquote class="reader-question">${escapeHTML(record.question.length > 160 ? `${record.question.slice(0, 160)}…` : record.question)}</blockquote>
         ${record.question.length > 160 ? `<details class="reader-question-details"><summary>阅读完整问题</summary><p>${escapeHTML(record.question)}</p></details>` : ""}
         <div class="reader-context-bottom"><span>${escapeHTML(categories[record.category] || "日常小事")}${recordSupplements(record).length ? ` · 已结合 ${recordSupplements(record).length} 条补充` : ""}</span><time datetime="${new Date(record.createdAt).toISOString()}">${date}</time><span class="reader-ornament" aria-hidden="true">— ✧ —</span></div>
@@ -537,22 +547,22 @@ function renderResult(record) {
         <div class="reader-tabs" role="tablist" aria-label="翻阅答案">${tabs.map(([tab, label], index) => `<button type="button" role="tab" id="reader-tab-${tab}" class="reader-tab" data-reader-tab="${tab}" aria-controls="reader-panel-${tab}" aria-selected="false" tabindex="-1"><span class="reader-tab-number">0${index + 1}</span>${label}</button>`).join("")}</div>
         <div class="reader-panels">
           <section id="reader-panel-answer" class="reader-panel reader-scroll" data-reader-panel="answer" role="tabpanel" aria-labelledby="reader-tab-answer" tabindex="0">
-            <div class="reader-answer-kicker">${icon("sparkles")}Jev 为你翻到的答案</div>
+            <div class="reader-answer-kicker">${icon("sparkles")}${direct ? "对你问题的回答" : "Jev 为你翻到的答案"}</div>
             <h3 class="reader-answer-title">${escapeHTML(chosen.title)}</h3>
-            <p class="reader-answer-description">${escapeHTML(chosen.description)}</p>
+            ${direct ? "" : `<p class="reader-answer-description">${escapeHTML(chosen.description)}</p>`}
             <div class="reader-divider" aria-hidden="true">✦</div>
-            <p class="reader-explanation">${formatProse(decision.explanation)}</p>
-            ${decision.explanationUnavailable ? '<p class="probability-note">本次解读暂不可用，Jev 的选择已保留。</p>' : ""}
-            <p class="reader-gentle-note">答案是启发，选择始终在你。</p>
+            <p class="reader-explanation">${formatProse(answerBody(record))}</p>
+            ${decision?.explanationUnavailable ? '<p class="probability-note">本次解读暂不可用，Jev 的选择已保留。</p>' : ""}
+            ${direct ? "" : '<p class="reader-gentle-note">答案是启发，选择始终在你。</p>'}
           </section>
-          <section id="reader-panel-choices" class="reader-panel reader-scroll" data-reader-panel="choices" role="tabpanel" aria-labelledby="reader-tab-choices" tabindex="0" hidden>
+          ${direct ? "" : `<section id="reader-panel-choices" class="reader-panel reader-scroll" data-reader-panel="choices" role="tabpanel" aria-labelledby="reader-tab-choices" tabindex="0" hidden>
             <h3 class="reader-panel-heading">每一种可能，都值得看见。</h3><p class="reader-panel-intro">点开卡片，看看每个方向意味着什么。</p>
             <div class="choice-list">${choices}</div><p class="probability-note">${hasProbabilities ? "百分比表示模型对这些选项的相对倾向，不是现实中的成功率。" : "本次服务未提供概率分布，已保留 Jev 返回的选择。"}</p>
-          </section>
+          </section>`}
           <section id="reader-panel-followup" class="reader-panel" data-reader-panel="followup" role="tabpanel" aria-labelledby="reader-tab-followup" hidden>
             <div class="followup-pagination" aria-label="追问卡片翻页"><button type="button" class="icon-button" data-followup-page="-1" aria-label="上一条追问">${icon("chevron")}</button><span id="followup-page-label" aria-live="polite"></span><button type="button" class="icon-button" data-followup-page="1" aria-label="下一条追问">${icon("chevron")}</button></div>
             <div id="followup-messages" class="followup-messages" aria-live="polite" tabindex="0" aria-label="当前追问内容"></div>
-            <div class="followup-suggestions"><button type="button" data-followup="为什么更推荐这个选择？有哪些需要留意的地方？">为什么这样选？</button><button type="button" data-followup="如果决定这样做，我可以从哪些具体的小步骤开始？">该怎么开始？</button><button type="button" data-followup="从另一个角度看，还有什么可能被忽略的因素？">换个角度</button></div>
+            <div class="followup-suggestions">${suggestions.map(([prompt, label]) => `<button type="button" data-followup="${escapeHTML(prompt)}">${label}</button>`).join("")}</div>
             <form id="followup-form"><label class="sr-only" for="followup-input">继续追问</label><textarea id="followup-input" rows="2" maxlength="1000" placeholder="带着这一页答案，继续聊聊…"></textarea><div class="followup-form-bottom"><span>AI 解读 · 参考最近 6 轮对话</span><button type="submit" class="primary-button" id="followup-send">继续追问${icon("arrow")}</button></div></form><div id="followup-error" class="form-error" role="alert" hidden></div>
           </section>
           <section id="reader-panel-supplement" class="reader-panel reader-scroll" data-reader-panel="supplement" role="tabpanel" aria-labelledby="reader-tab-supplement" tabindex="0" hidden></section>
@@ -560,7 +570,7 @@ function renderResult(record) {
       </div>
       ${openingNewPage ? '<div class="reader-opening-cover" aria-hidden="true"><span>THE BOOK OF ANSWERS</span><strong>答案之书</strong><i>✧</i><small>每一页，都是一种可能</small></div>' : ""}
     </div>
-    <footer class="reader-footer"><div class="reader-page-marker"><span id="reader-page-number">01 / 04</span><small>慢慢读，不必急着决定</small></div><div class="reader-actions"><button type="button" class="secondary-button ${record.favorite ? "is-saved" : ""}" data-action="favorite-current" aria-pressed="${!!record.favorite}">${icon("bookmark")}${record.favorite ? "已收藏" : "收藏启示"}</button><button type="button" class="secondary-button" data-action="copy">${icon("copy")}复制答案</button><button type="button" class="secondary-button" data-action="new">再问一题${icon("arrow")}</button></div></footer>`;
+    <footer class="reader-footer"><div class="reader-page-marker"><span id="reader-page-number">01 / 04</span><small>${direct ? "慢慢读，我们接着聊" : "慢慢读，不必急着决定"}</small></div><div class="reader-actions"><button type="button" class="secondary-button ${record.favorite ? "is-saved" : ""}" data-action="favorite-current" aria-pressed="${!!record.favorite}">${icon("bookmark")}${record.favorite ? "已收藏" : "收藏启示"}</button><button type="button" class="secondary-button" data-action="copy">${icon("copy")}复制答案</button><button type="button" class="secondary-button" data-action="new">再问一题${icon("arrow")}</button></div></footer>`;
   renderSupplement(record);
   $("#followup-input").value = state.followupDrafts.get(record.id) || "";
   renderFollowups(record);
@@ -594,7 +604,7 @@ function renderFollowups(record, pendingQuestion) {
     ? `<div class="followup-turn"><div class="chat-question"><span>你的追问 · ${state.followupPage + 1}</span><p>${escapeHTML(message.question)}</p></div><div class="chat-answer"><span>${icon("sparkles")}答案之书 · AI 解读</span><p>${formatProse(message.answer)}</p></div></div>`
     : pendingQuestion
       ? `<div class="followup-turn"><div class="chat-question"><span>你的追问</span><p>${escapeHTML(pendingQuestion)}</p></div><div class="chat-answer chat-thinking"><span class="spinner"></span>正在结合前面的对话思考…<button type="button" class="text-button" data-action="cancel">取消</button></div></div>`
-      : `<div class="reader-chat-empty">${icon("book-open")}<h3>一个答案，也可以是对话的开始。</h3><p>为什么这样选，下一步怎么做？<br>你的每次追问，都会成为一张新的卡片。</p></div>`;
+      : `<div class="reader-chat-empty">${icon("book-open")}<h3>一个答案，也可以是对话的开始。</h3><p>${isDirect(record) ? "想了解更多，或补充具体情况？" : "为什么这样选，下一步怎么做？"}<br>你的每次追问，都会成为一张新的卡片。</p></div>`;
   container.scrollTop = 0;
 }
 async function askFollowup(event) {
@@ -711,17 +721,15 @@ function renderHistory() {
   const records = state.records.filter(
     (record) =>
       (!favorites || record.favorite) &&
-      `${record.question} ${recordSupplements(record).join(" ")} ${record.options.choices.map((choice) => choice.title).join(" ")} ${record.decision.explanation}`
+      `${record.question} ${recordSupplements(record).join(" ")} ${isDirect(record) ? answerTitle(record) : record.options.choices.map((choice) => choice.title).join(" ")} ${answerBody(record)}`
         .toLocaleLowerCase()
         .includes(search),
   );
   $("#history-list").innerHTML = records.length
     ? records
         .map((record) => {
-          const chosen = record.options.choices.find(
-            (choice) => choice.id === record.decision.choiceId,
-          );
-          return `<article class="history-card"><div class="history-meta"><span>${escapeHTML(categories[record.category] || "日常小事")}${recordSupplements(record).length ? ` · 补充 ${recordSupplements(record).length} 次` : ""}</span><time datetime="${new Date(record.createdAt).toISOString()}">${new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(record.createdAt)}</time></div><h3>${escapeHTML(record.question)}</h3><div class="history-answer">${icon("sparkles")}${escapeHTML(chosen.title)}</div><div class="history-actions"><button class="text-button delete-record" data-delete="${escapeHTML(record.id)}" aria-label="删除这条答案">${icon("trash")}</button><button class="secondary-button ${record.favorite ? "is-saved" : ""}" data-favorite="${escapeHTML(record.id)}" aria-label="${record.favorite ? "取消收藏" : "收藏这条答案"}" aria-pressed="${!!record.favorite}">${icon("bookmark")}</button><button class="secondary-button" data-record="${escapeHTML(record.id)}">重读这一页${icon("arrow")}</button></div></article>`;
+          const title = answerTitle(record);
+          return `<article class="history-card"><div class="history-meta"><span>${escapeHTML(categories[record.category] || "日常小事")}${recordSupplements(record).length ? ` · 补充 ${recordSupplements(record).length} 次` : ""}</span><time datetime="${new Date(record.createdAt).toISOString()}">${new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(record.createdAt)}</time></div><h3>${escapeHTML(record.question)}</h3><div class="history-answer">${icon("sparkles")}${escapeHTML(title)}</div><div class="history-actions"><button class="text-button delete-record" data-delete="${escapeHTML(record.id)}" aria-label="删除这条答案">${icon("trash")}</button><button class="secondary-button ${record.favorite ? "is-saved" : ""}" data-favorite="${escapeHTML(record.id)}" aria-label="${record.favorite ? "取消收藏" : "收藏这条答案"}" aria-pressed="${!!record.favorite}">${icon("bookmark")}</button><button class="secondary-button" data-record="${escapeHTML(record.id)}">重读这一页${icon("arrow")}</button></div></article>`;
         })
         .join("")
     : `<div class="empty-state"><span>${icon(search ? "search" : favorites ? "bookmark" : "book-open")}</span><h3>${search ? "还没找到这一页" : favorites ? "为触动你的答案，折一个角" : "你的故事，从第一个问题开始"}</h3><p>${search ? "试试其他关键词，或清空搜索。" : favorites ? "在答案下点击「收藏启示」，就能在这里重温。" : "写下此刻的困惑，答案会被收录在这里。"}</p>${search ? '<button class="secondary-button" data-action="clear-search">清空搜索</button>' : '<button class="primary-button" data-view="home">翻开第一个答案' + icon("arrow") + "</button>"}</div>`;
@@ -752,7 +760,7 @@ function newQuestion() {
 async function copyAnswer() {
   const record = state.current;
   if (!record) return;
-  const choice = record.options.choices.find(
+  const choice = isDirect(record) ? null : record.options.choices.find(
     (item) => item.id === record.decision.choiceId,
   );
   const conversation = validFollowups(record)
@@ -761,7 +769,9 @@ async function copyAnswer() {
     )
     .join("");
   const supplements = recordSupplements(record).map((item, index) => `\n\n补充 ${index + 1}：${item}`).join("");
-  const text = `答案之书 · 遇事不决，Jev 解决\n\n我的问题：${record.question}${supplements}\n\nJev 的选择：${choice.title}\n${choice.description}\n\n${record.decision.explanation}${conversation}\n\n答案是启发，选择始终在你。`;
+  const text = isDirect(record)
+    ? `答案之书\n\n我的问题：${record.question}${supplements}\n\n${answerTitle(record)}\n${answerBody(record)}${conversation}`
+    : `答案之书 · 遇事不决，Jev 解决\n\n我的问题：${record.question}${supplements}\n\nJev 的选择：${choice.title}\n${choice.description}\n\n${record.decision.explanation}${conversation}\n\n答案是启发，选择始终在你。`;
   try {
     await navigator.clipboard.writeText(text);
     toast("答案已复制，带着它迈出下一步。");
@@ -785,141 +795,19 @@ async function copyAnswer() {
   }
 }
 
-// 设置只接收服务端脱敏信息；密钥留空不会覆盖已经保存的密钥。
-function isConfigured(config) {
-  return !!(
-    config?.llm?.baseURL &&
-    config.llm.model &&
-    config.jev?.[config.jev.provider]?.apiKeyConfigured
-  );
-}
-function updateConnection() {
-  const configured = isConfigured(state.config);
-  $("#connection").classList.toggle("unconfigured", !configured);
-  $("#connection-label").textContent = configured ? "模型已配置" : "连接模型";
-}
-const defaultConfig = {
-  llm: { name: "custom", baseURL: "", model: "", apiKeyConfigured: false },
-  jev: {
-    provider: "typesafe",
-    typesafe: {
-      baseURL: "https://api.typesafe.ai/v1",
-      model: "jev-latest",
-      apiKeyConfigured: false,
-    },
-    vercel: {
-      baseURL: "https://ai-gateway.vercel.sh/v4/ai",
-      model: "typesafe-ai/jev",
-      apiKeyConfigured: false,
-    },
-  },
-};
-async function loadConfig() {
+// 访客只获取服务是否就绪，不读取模型地址、密钥或其他管理员配置。
+async function loadStatus() {
   try {
-    const { config } = await api("/api/config", { timeout: 10000 });
-    state.config = config;
+    const { ready } = await api("/api/status", { timeout: 10000 });
+    state.ready = ready === true;
   } catch {
-    $("#connection-label").textContent = "服务未连接";
-    $("#connection").classList.add("unconfigured");
-    return;
+    state.ready = false;
   }
-  updateConnection();
-}
-function openSettings() {
-  if (state.busy) {
-    toast("请先等待当前问题完成，或取消等待后修改设置。");
-    return;
-  }
-  state.settingsDraft = structuredClone(state.config || defaultConfig);
-  $("#llm-url").value = state.settingsDraft.llm.baseURL || "";
-  $("#llm-model").value = state.settingsDraft.llm.model || "";
-  $("#llm-key").value = "";
-  $("#llm-key").placeholder = state.settingsDraft.llm.apiKeyConfigured
-    ? "已配置 · 留空保留原密钥"
-    : "输入 API Key（本地服务可留空）";
-  $("#jev-provider").value = state.settingsDraft.jev.provider;
-  fillJevFields();
-  showError("#settings-error", "");
-  $("#settings-dialog").showModal();
-}
-function captureJevFields() {
-  const provider = state.settingsDraft.jev.provider;
-  state.settingsDraft.jev[provider] = {
-    ...state.settingsDraft.jev[provider],
-    baseURL: $("#jev-url").value.trim(),
-    model: $("#jev-model").value.trim(),
-    apiKey: $("#jev-key").value.trim(),
-  };
-}
-function fillJevFields() {
-  const config = state.settingsDraft.jev[state.settingsDraft.jev.provider];
-  $("#jev-url").value = config.baseURL || "";
-  $("#jev-model").value = config.model || "";
-  $("#jev-key").value = config.apiKey || "";
-  $("#jev-key").placeholder = config.apiKeyConfigured
-    ? "已配置 · 留空保留原密钥"
-    : "输入 Jev API Key";
-}
-async function saveSettings(event) {
-  event.preventDefault();
-  captureJevFields();
-  const button = $("#save-settings");
-  button.disabled = true;
-  showError("#settings-error", "");
-  const config = state.settingsDraft;
-  config.llm = {
-    ...config.llm,
-    baseURL: $("#llm-url").value.trim(),
-    model: $("#llm-model").value.trim(),
-    apiKey: $("#llm-key").value.trim(),
-  };
-  try {
-    if (
-      !config.jev[config.jev.provider].apiKey &&
-      !config.jev[config.jev.provider].apiKeyConfigured
-    )
-      throw new Error("请填写当前 Jev 接入方式的 API Key。");
-    state.config = (
-      await api("/api/config", { body: config, timeout: 15000 })
-    ).config;
-    updateConnection();
-    $("#settings-dialog").close();
-    toast("设置已保存，可以翻开你的答案了。");
-    showError("#form-error", "");
-  } catch (error) {
-    showError("#settings-error", readableError(error));
-  } finally {
-    button.disabled = false;
-  }
-}
-async function fetchModels() {
-  const button = $("#fetch-models");
-  button.disabled = true;
-  button.textContent = "读取中…";
-  showError("#settings-error", "");
-  try {
-    const llm = { baseURL: $("#llm-url").value.trim() };
-    if ($("#llm-key").value.trim()) llm.apiKey = $("#llm-key").value.trim();
-    const { models } = await api("/api/models", {
-      body: { llm },
-      timeout: 20000,
-    });
-    $("#model-list").innerHTML = models
-      .map((model) => `<option value="${escapeHTML(model)}"></option>`)
-      .join("");
-    if (!$("#llm-model").value && models.length)
-      $("#llm-model").value = models[0];
-    toast(
-      models.length
-        ? `已读取 ${models.length} 个模型，点击模型名称选择。`
-        : "服务未返回模型列表，可以手动填写模型名称。",
-    );
-  } catch (error) {
-    showError("#settings-error", readableError(error));
-  } finally {
-    button.disabled = false;
-    button.textContent = "获取模型";
-  }
+  $("#connection").classList.toggle("unconfigured", !state.ready);
+  $("#connection-label").textContent = state.ready ? "服务可用" : "暂未就绪";
+  $("#connection").title = state.ready
+    ? "服务已配置，点击刷新状态"
+    : "服务暂未就绪，请等待管理员配置或稍后再试；点击刷新状态";
 }
 
 // 事件委托覆盖动态结果和历史卡片，不重复绑定监听器。
@@ -1009,7 +897,7 @@ document.addEventListener("click", (event) => {
     state.pending = null;
     renderResult(state.current);
   }
-  if (action === "settings") openSettings();
+  if (action === "refresh-status") loadStatus();
   if (action === "cancel") state.controller?.abort();
   if (action === "retry") {
     if (state.pending?.parentId) {
@@ -1089,25 +977,10 @@ $("#shuffle-prompts").addEventListener("click", () => {
   renderPrompts();
 });
 $("#history-search").addEventListener("input", renderHistory);
-$("#settings-form").addEventListener("submit", saveSettings);
-$("#close-settings").addEventListener("click", () =>
-  $("#settings-dialog").close(),
-);
-$("#settings-dialog").addEventListener("close", () => {
-  $("#llm-key").value = "";
-  $("#jev-key").value = "";
-  state.settingsDraft = null;
-});
-$("#jev-provider").addEventListener("change", () => {
-  captureJevFields();
-  state.settingsDraft.jev.provider = $("#jev-provider").value;
-  fillJevFields();
-});
-$("#fetch-models").addEventListener("click", fetchModels);
 hydrateIcons();
 restoreLocalData();
 selectCategory(state.category);
 updateCounts();
 renderPrompts();
 setView("home");
-loadConfig();
+loadStatus();

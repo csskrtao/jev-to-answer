@@ -9,7 +9,8 @@ const options = { question, state: { context: '想安排一个轻松的周末' }
   { id: 'option_b', title: '留在家里读书', description: '选择一本感兴趣的书，放慢节奏。' },
 ] };
 const decision = { choiceId: 'option_a', probabilities: { option_a: 0.7, option_b: 0.3 }, explanation: '可以先到附近的公园轻松散步，给周末一点新鲜感。' };
-const config = { llm: { model: 'test-model' }, jev: { provider: 'test' } };
+// HTTP 测试提供已就绪的虚构连接，不会访问真实服务。
+const config = { llm: { model: 'test-model', baseURL: 'https://example.test/v1' }, jev: { provider: 'typesafe', typesafe: { apiKey: 'test-only-key' } } };
 const input = () => ({ question, options: structuredClone(options), decision: structuredClone(decision), messages: [], followUp: '具体怎么安排比较轻松？' });
 const request = (body) => new Request('http://localhost/api/book/follow-up', {
   method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),

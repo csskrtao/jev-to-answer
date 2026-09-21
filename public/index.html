@@ -55,11 +55,6 @@
         <span class="note-line"></span><small>写给正在犹豫的你</small>
       </div>
       <div class="sidebar-bottom">
-        <button class="settings-button" data-action="settings">
-          <span data-icon="settings"></span>模型设置<span
-            data-icon="chevron"
-          ></span>
-        </button>
         <div class="powered">
           <span class="status-dot"></span>Powered by Jev <span>v 1.0</span>
         </div>
@@ -82,9 +77,9 @@
               <option value="light">浅色</option>
               <option value="dark">深色</option>
             </select></label
-          ><button class="connection" data-action="settings" id="connection">
+          ><button class="connection" data-action="refresh-status" id="connection" type="button" aria-label="刷新服务状态">
             <span class="status-dot"></span
-            ><span id="connection-label">正在连接</span>
+            ><span id="connection-label" aria-live="polite">正在连接</span>
           </button>
         </div>
       </header>
@@ -270,10 +265,7 @@
       ><button data-view="history">
         <span data-icon="history"></span>我的答案</button
       ><button data-view="favorites">
-        <span data-icon="bookmark"></span>收藏</button
-      ><button data-action="settings">
-        <span data-icon="settings"></span>设置
-      </button>
+        <span data-icon="bookmark"></span>收藏</button>
     </nav>
     <!-- 阅读器独立于首页，内容在书页中切换，不再向下叠加。原生 dialog 同时提供焦点约束与 Esc 关闭。 -->
     <dialog id="reader-dialog" class="reader-dialog" aria-labelledby="reader-title">
@@ -286,87 +278,6 @@
         <section id="journey" class="journey reader-journey" aria-live="polite" hidden></section>
         <section id="result" class="reader-result" hidden></section>
       </div>
-    </dialog>
-    <dialog
-      id="settings-dialog"
-      class="settings-dialog"
-      aria-labelledby="settings-title"
-    >
-      <form id="settings-form">
-        <div class="dialog-heading">
-          <div>
-            <span class="section-kicker">MAKE IT YOURS</span>
-            <h2 id="settings-title">连接你的答案之书</h2>
-          </div>
-          <button
-            class="icon-button"
-            type="button"
-            id="close-settings"
-            aria-label="关闭设置"
-          >
-            <span data-icon="close"></span>
-          </button>
-        </div>
-        <p class="settings-intro">
-          连接一个大模型来整理选项，再让 Jev 帮你做出选择。
-        </p>
-        <fieldset>
-          <legend><span>01</span> 大模型 · 整理可能</legend>
-          <label
-            >服务地址<input
-              type="url"
-              id="llm-url"
-              placeholder="https://api.openai.com/v1"
-              required /></label
-          ><label
-            >API Key<input
-              type="password"
-              id="llm-key"
-              placeholder="输入 API Key（本地服务可留空）"
-              autocomplete="off"
-          /></label>
-          <div class="model-field">
-            <label
-              >模型名称<input
-                type="text"
-                id="llm-model"
-                placeholder="输入或选择模型"
-                list="model-list"
-                required /><datalist id="model-list"></datalist></label
-            ><button type="button" class="secondary-button" id="fetch-models">
-              获取模型
-            </button>
-          </div>
-        </fieldset>
-        <fieldset>
-          <legend><span>02</span> Jev · 给出方向</legend>
-          <label
-            >接入方式<select id="jev-provider">
-              <option value="typesafe">TypeSafe API</option>
-              <option value="vercel">Vercel AI Gateway</option>
-            </select></label
-          ><label>服务地址<input type="url" id="jev-url" required /></label
-          ><label
-            >API Key<input
-              type="password"
-              id="jev-key"
-              autocomplete="off"
-              placeholder="输入 Jev API Key" /></label
-          ><label>模型名称<input type="text" id="jev-model" required /></label>
-        </fieldset>
-        <p class="settings-note">
-          <span data-icon="lock"></span
-          >密钥保存在本机服务端；已配置时留空即可保留。
-        </p>
-        <div id="settings-error" class="form-error" role="alert" hidden></div>
-        <div class="dialog-footer">
-          <a href="/playground.html" target="_blank" rel="noopener"
-            >打开调试台 <span data-icon="external"></span></a
-          ><button type="submit" class="primary-button" id="save-settings">
-            保存设置<span data-icon="check"></span>
-          </button>
-        </div>
-      </form>
     </dialog>
     <div id="toast" class="toast" role="status" hidden></div>
   </body>
