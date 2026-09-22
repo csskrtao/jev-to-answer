@@ -1,4 +1,5 @@
-import { generateBookOptions, explainBookDecision, answerBookFollowUp } from './llm.js';
+import { generateBookOptions, explainBookDecision, answerBookFollowUp, rewriteBookAnswer } from './llm.js';
+import { validateResponseStyle } from './response-styles.js';
 import { runEvaluate } from './jev.js';
 
 const forbiddenKeys = new Set(['__proto__', 'prototype', 'constructor']);
@@ -168,13 +169,14 @@ export function validateFollowUpMessages(messages = []) {
 }
 
 /** 注入外部步骤，使测试能够覆盖真实流程而无需联网或消耗 API 配额。 */
-export function createBookService({ generateOptions = generateBookOptions, evaluate = runEvaluate, explain = explainBookDecision, followUp = answerBookFollowUp } = {}) {
+export function createBookService({ generateOptions = generateBookOptions, evaluate = runEvaluate, explain = explainBookDecision, followUp = answerBookFollowUp, rewrite = rewriteBookAnswer } = {}) {
   return {
     async options(config, body) {
+      const style = validateResponseStyle(body?.style);
       const question = validateQuestion(body?.question);
       const supplements = validateSupplements(body?.supplements);
       const category = body?.category === undefined ? '日常' : limitedString(body.category, '分类', 40);
-      const generated = await generateOptions(config.llm, { question, category, supplements });
+      const generated = await generateOptions(config.llm, { question, category, supplements, style });
       if (!isObject(generated)) fail('大模型未返回有效选项，请重新尝试', 502);
       // 分类与内容一起生成；普通问答在此结束，不进入 Jev 决策链路。
       if (generated.kind === 'direct') {
@@ -184,6 +186,7 @@ export function createBookService({ generateOptions = generateBookOptions, evalu
       return validateOptions({ question, state: generated.state, choices: generated.choices, supplements }, question, 502, supplements);
     },
     async decide(config, body) {
+      const style = validateResponseStyle(body?.style);
       const question = validateQuestion(body?.question);
       const supplements = validateSupplements(body?.supplements);
       const options = validateOptions(body?.options, question, 400, supplements);
@@ -201,7 +204,7 @@ export function createBookService({ generateOptions = generateBookOptions, evalu
       });
       const decision = validateDecision(result, options.choices);
       try {
-        const text = await explain(config.llm, { question, supplements: options.supplements || [], options, decision });
+        const text = await explain(config.llm, { question, supplements: options.supplements || [], options, decision, style });
         const explanation = typeof text === 'string' ? text.trim() : '';
         const length = [...explanation].length;
         // 模型略短或略长的有效解读仍可展示，避免仅因字数偏差丢失有用内容。
@@ -217,6 +220,7 @@ export function createBookService({ generateOptions = generateBookOptions, evalu
       }
     },
     async followUp(config, body) {
+      const style = validateResponseStyle(body?.style);
       const question = validateQuestion(body?.question);
       const supplements = validateSupplements(body?.supplements);
       if (body?.options?.kind === 'direct') {
@@ -224,16 +228,30 @@ export function createBookService({ generateOptions = generateBookOptions, evalu
         if (body.decision != null) fail('直接回答不能包含 Jev 决策结果');
         const messages = validateFollowUpMessages(body?.messages);
         const nextQuestion = limitedString(body?.followUp, '追问', 1000);
-        const answer = await followUp(config.llm, { question, options, decision: null, messages, followUp: nextQuestion });
+        const answer = await followUp(config.llm, { question, options, decision: null, messages, followUp: nextQuestion, style });
         return limitedString(answer, 'AI 回答', 2000, 502);
       }
       const options = validateOptions(body?.options, question, 400, supplements);
       const decision = validateFollowUpDecision(body?.decision, options.choices);
       const messages = validateFollowUpMessages(body?.messages);
       const nextQuestion = limitedString(body?.followUp, '追问', 1000);
-      const answer = await followUp(config.llm, { question, options, decision, messages, followUp: nextQuestion });
+      const answer = await followUp(config.llm, { question, options, decision, messages, followUp: nextQuestion, style });
       // 失败或异常输出直接报错，客户端可重试；不添加假回答到对话历史。
       return limitedString(answer, 'AI 回答', 2000, 502);
+    },
+    async rewrite(config, body) {
+      const style = validateResponseStyle(body?.style);
+      const question = validateQuestion(body?.question);
+      const supplements = validateSupplements(body?.supplements);
+      const direct = body?.options?.kind === 'direct';
+      const options = direct
+        ? validateDirectAnswer(body.options, question, 400, supplements)
+        : validateOptions(body?.options, question, 400, supplements);
+      if (direct && body.decision != null) fail('直接回答不能包含 Jev 决策结果');
+      const decision = direct ? null : validateFollowUpDecision(body?.decision, options.choices);
+      // 重写只替换正文，既有候选与真实概率完全由调用方保留，不触发重新评估。
+      const answer = await rewrite(config.llm, { question, supplements, options, decision, style });
+      return { style, answer: limitedString(answer, '重写回答', direct ? 2000 : 800, 502) };
     },
   };
 }

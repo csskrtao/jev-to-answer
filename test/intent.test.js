@@ -80,7 +80,7 @@ test('直接回答追问携带原答案和历史，将 decision 设为 null', as
     followUp: async (_, input) => { received = input; return '反复打断别人会影响沟通，但这不足以评价他的整个人。'; },
   });
   assert.match(await service.followUp(config, body), /打断/);
-  assert.deepEqual(received, { question, options: body.options, decision: null, messages: body.messages, followUp: body.followUp });
+  assert.deepEqual(received, { question, options: body.options, decision: null, messages: body.messages, followUp: body.followUp, style: 'gentle' });
 });
 
 test('直接回答追问拒绝更换问题、补充背景和非法答案结构，避免沿用失效上下文', async () => {

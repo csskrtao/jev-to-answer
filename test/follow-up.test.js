@@ -31,7 +31,7 @@ test('追问带入完整上下文，只调用解读模型，不生成选项或�
   body.messages = [{ question: '为什么散步更适合？', answer: '轻量活动能为这次休息提供一点环境变化。' }];
   const answer = await service.followUp(config, body);
   assert.ok(answer.includes('二十分钟'));
-  assert.deepEqual(received, body);
+  assert.deepEqual(received, { ...body, style: 'gentle' });
   assert.deepEqual(body.decision, decision);
   assert.equal(body.messages.length, 1);
 });
@@ -92,7 +92,7 @@ test('追问 HTTP 路由保持成功合同，校验失败与模型失败不会�
   const app = createApp({ readConfig: async () => config, bookService: createBookService({ followUp: async () => '先从附近的短路线开始。' }) });
   const success = await app.fetch(request(input()));
   assert.equal(success.status, 200);
-  assert.deepEqual(await success.json(), { ok: true, answer: '先从附近的短路线开始。' });
+  assert.deepEqual(await success.json(), { ok: true, style: 'gentle', answer: '先从附近的短路线开始。' });
   const invalid = await app.fetch(request({ ...input(), followUp: '' }));
   assert.equal(invalid.status, 400);
   assert.equal(Object.hasOwn(await invalid.json(), 'answer'), false);

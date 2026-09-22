@@ -2,6 +2,7 @@ import { H3, readBody, assertBodySize } from 'h3';
 import { DEFAULT_CONFIG } from './config.js';
 import { isServiceReady } from './runtime-config.js';
 import { createBookService } from './book.js';
+import { publicResponseStyles, validateResponseStyle } from './response-styles.js';
 
 /** JSON 请求限制为 64 KiB，先限制字节数再进行字段校验。 */
 async function readInput(event) {
@@ -47,9 +48,11 @@ export function createApp(dependencies = {}) {
 
   // 访客只知道服务是否就绪，不接收服务地址、模型名称或任何凭据。
   app.get('/api/status', wrap(async () => ({ ready: isServiceReady(await getConfig()) })));
+  app.get('/api/book/styles', wrap(async () => ({ styles: publicResponseStyles() })));
 
   async function prepare(event) {
     const body = await readInput(event);
+    body.style = validateResponseStyle(body.style);
     // 拒绝旧客户端的连接覆盖，防止把服务端密钥发送到访客指定的地址。
     if (['llm', 'jev', 'baseURL', 'apiKey', 'model'].some((key) => Object.hasOwn(body, key))) {
       throw Object.assign(new Error('访客不能修改模型连接配置'), { status: 400 });
@@ -63,15 +66,19 @@ export function createApp(dependencies = {}) {
   // 两阶段接口用于展示选项生成进度，网页拿到候选后自动交给 Jev。
   app.post('/api/book/options', wrap(async (event) => {
     const { body, config, limited } = await prepare(event);
-    return limited || { options: await book.options(config, body) };
+    return limited || { style: body.style, options: await book.options(config, body) };
   }));
   app.post('/api/book/decide', wrap(async (event) => {
     const { body, config, limited } = await prepare(event);
-    return limited || { decision: await book.decide(config, body) };
+    return limited || { style: body.style, decision: await book.decide(config, body) };
   }));
   app.post('/api/book/follow-up', wrap(async (event) => {
     const { body, config, limited } = await prepare(event);
-    return limited || { answer: await book.followUp(config, body) };
+    return limited || { style: body.style, answer: await book.followUp(config, body) };
+  }));
+  app.post('/api/book/rewrite', wrap(async (event) => {
+    const { body, config, limited } = await prepare(event);
+    return limited || await book.rewrite(config, body);
   }));
 
   // 旧配置、调试以及未知 API 一律关闭，不能落入静态页面。
