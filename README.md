@@ -18,7 +18,7 @@ AI 整理可能 · Jev 帮你选择 · 每一页，都是一种新的可能
 ![Frontend](https://img.shields.io/badge/Frontend-Vanilla_JS-d4b487?style=flat-square)
 ![Tribute](https://img.shields.io/badge/Inspired_by-jev_demo-697456?style=flat-square)
 
-[页面预览](#页面预览) · [快速开始](#快速开始) · [它如何给出答案](#它如何给出答案) · [致敬与鸣谢](#致敬与鸣谢)
+[页面预览](#页面预览) · [快速开始](#快速开始) · [API 配置](#api-配置) · [它如何给出答案](#它如何给出答案) · [致敬与鸣谢](#致敬与鸣谢)
 
 </div>
 
@@ -86,15 +86,13 @@ Copy-Item .env.example .env
 notepad .env
 ```
 
-由管理员在 `.env` 中填写服务参数。下面仅为占位示例，请替换为自己的模型名称和密钥：
+在 `.env` 中填写大模型和 Jev 的参数。下面以兼容 Chat Completions 的大模型服务与 TypeSafe 通道为例，模型名称和密钥必须替换：
 
 ```dotenv
 LLM_BASE_URL=https://api.openai.com/v1
 LLM_MODEL=your-chat-model
 LLM_API_KEY=replace-with-your-llm-key
 JEV_PROVIDER=typesafe
-JEV_BASE_URL=https://api.typesafe.ai/v1
-JEV_MODEL=jev-latest
 JEV_API_KEY=replace-with-your-jev-key
 ```
 
@@ -106,28 +104,93 @@ npm start
 
 打开 **[http://localhost:9001](http://localhost:9001)**。这是独立运行的项目，有自己的依赖、配置和端口，无需同时启动 `jev_demo`。访客直接提问，费用由配置密钥的管理员承担。
 
-### 2. 管理员配置与 Cloudflare 部署
+### 2. 确认配置并开始使用
 
-页面和 API 一起发布为 **Cloudflare Workers**。密钥由管理员保存在 Workers Secrets；页面没有模型设置入口，访客不能读取或修改模型连接配置。
+按下方 [API 配置](#api-配置) 核对服务地址、模型与密钥，再刷新页面。配置由管理员统一提供，访客无需填写 API Key。
 
-| 配置项 | 用途 | Cloudflare 保存位置 |
+选择分类，写下困惑，点击「翻开我的答案」。试着给它多一点背景：
+
+> 忙碌了一周，有点疲惫，但也想换换心情。这个周末该出去走走，还是留在家好好休息？预算不多，希望周一能恢复精神。
+
+得到答案后，可以继续问「如果只有半天时间，该怎么安排？」，或者收藏这一页，留给以后重读。
+
+## API 配置
+
+**需要配置两类服务：大模型负责理解与回答，Jev 负责决策选择。** 它们的服务地址、模型名称和密钥分别填写。当前版本只读取管理员提供的环境变量，网页不提供模型设置或密钥输入入口。
+
+### 配置应该放在哪里
+
+| 运行方式 | 普通参数 | API 密钥 | 如何生效 |
+| :--- | :--- | :--- | :--- |
+| 本地 Node.js：`npm start` / `npm run dev` | 项目根目录 `.env` | 同一个 `.env` 文件 | 修改后重启服务 |
+| 本地 Workers：`npm run cf:dev` | `wrangler.jsonc` 的 `vars`；本地可用 `.dev.vars` 配置 | 项目根目录 `.dev.vars` | 修改后重启本地模拟 |
+| 线上 Cloudflare Workers | `wrangler.jsonc` 的 `vars` | Workers Secrets | 修改 `vars` 后重新部署；Secrets 单独更新 |
+
+`.env` 与 `.dev.vars` 已被 Git 忽略。线上部署不会自动上传这两个文件，也不会自动把其中的密钥转成 Secrets。Node.js 启动时，已有的系统或 PowerShell 环境变量优先于 `.env` 中的同名值。
+
+### 大模型：理解问题、生成选项与解读
+
+| 环境变量 | 是否必填 | 填写方式 |
 | :--- | :--- | :--- |
-| `LLM_API_KEY` | 大模型服务密钥 | Secret |
-| `JEV_API_KEY` | 当前 Jev 通道的密钥 | Secret |
-| `LLM_BASE_URL`、`LLM_MODEL` | 大模型服务地址、模型名称 | 普通环境变量 |
-| `JEV_PROVIDER` | `typesafe`（默认）或 `vercel` | 普通环境变量 |
-| `JEV_BASE_URL`、`JEV_MODEL` | Jev 服务地址、模型名称 | 普通环境变量；可采用下表默认值 |
+| `LLM_BASE_URL` | 必填 | 服务商提供的 **OpenAI Chat Completions 兼容 API 基础地址**，例如 `https://api.openai.com/v1` |
+| `LLM_MODEL` | 必填 | 该服务商实际支持、且你的账号有权调用的模型 ID；不能填写展示昵称或占位符 |
+| `LLM_API_KEY` | 通常必填 | 对应大模型服务的密钥原文，不加 `Bearer ` 前缀；仅免鉴权服务可留空 |
 
-Jev 的默认接入参数：
+`LLM_BASE_URL` 不填写官网、控制台页面或完整的 `/chat/completions` 请求地址；程序会通过 SDK 拼接接口路径。是否包含 `/v1` 以服务商文档为准，也不要填写 `/responses`。
+
+模型需要支持文本对话，并能按提示返回 JSON。项目会设置 `temperature` 和输出 token 上限，所选兼容服务也需要支持这些调用参数。
+
+本地免鉴权服务可以省略 `LLM_API_KEY`，但服务地址必须能从**运行后端的环境**访问。将项目部署到 Cloudflare 后，`localhost` 或 `127.0.0.1` 不会指向你自己的电脑。
+
+### Jev：从候选选项中做出选择
+
+| 环境变量 | 是否必填 | 填写方式 |
+| :--- | :--- | :--- |
+| `JEV_PROVIDER` | 可选 | `typesafe` 或 `vercel`，默认 `typesafe` |
+| `JEV_API_KEY` | 必填 | 当前通道所属平台的密钥原文，不加 `Bearer ` 前缀 |
+| `JEV_BASE_URL` | 可选 | 不设置或留空时，使用当前通道的默认地址 |
+| `JEV_MODEL` | 可选 | 不设置或留空时，使用当前通道的默认模型 |
+
+两个通道选择一个即可：
 
 | 接入方式 | 服务地址 | 模型 |
 | :--- | :--- | :--- |
 | `typesafe` | `https://api.typesafe.ai/v1` | `jev-latest` |
 | `vercel` | `https://ai-gateway.vercel.sh/v4/ai` | `typesafe-ai/jev` |
 
-**Jev 使用决策接口，不能当作聊天模型填写到 `LLM_MODEL`。**
+**方案 A · TypeSafe API**
 
-先在 `wrangler.jsonc` 的 `vars` 中填写普通环境变量；不要把密钥写进该文件。管理员部署时，在 PowerShell 中执行：
+从 [TypeSafe 官方文档](https://docs.typesafe.ai/api) 了解 API 访问与密钥获取方式，在配置文件中填写：
+
+```dotenv
+# TypeSafe 通道：使用默认服务地址与 jev-latest 模型。
+JEV_PROVIDER=typesafe
+JEV_API_KEY=replace-with-your-typesafe-key
+```
+
+程序会向基础地址下的 `/systemone` 发起请求，因此 `JEV_BASE_URL` 不要重复添加 `/systemone`。
+
+**方案 B · Vercel AI Gateway**
+
+在 [Vercel AI Gateway](https://vercel.com/ai-gateway) 配置网关访问权限并创建 API Key，然后填写：
+
+```dotenv
+# Vercel 通道：使用默认网关地址与 typesafe-ai/jev 模型。
+JEV_PROVIDER=vercel
+JEV_API_KEY=replace-with-your-vercel-gateway-key
+```
+
+使用该通道前，确认账号满足网关的计费及模型访问要求；具体额度和付款要求以 Vercel 控制台为准。
+
+**切换通道时，同时替换 `JEV_API_KEY`，并删除配置中旧的 `JEV_BASE_URL`、`JEV_MODEL` 两项，或将它们改成新通道的对应值。** 显式填写的地址和模型优先于默认值，仅修改 `JEV_PROVIDER` 不会自动覆盖旧值。仓库当前的 `wrangler.jsonc` 已显式填写 TypeSafe 的地址与模型，线上切换时也要一并调整。
+
+Jev 使用决策接口，不能当作聊天模型填写到 `LLM_MODEL`。即使只测试普通问答，当前服务的就绪检查仍要求配置 `JEV_API_KEY`。
+
+### 部署到 Cloudflare Workers
+
+页面与 API 一起部署为 Workers。先修改 `wrangler.jsonc` 的 `vars`，填写 `LLM_BASE_URL`、`LLM_MODEL` 和选定的 Jev 通道参数；**密钥不写入 `vars`**。部署到自己的账号时，还应将 `routes` 中的项目域名改为自己已配置的域名，或移除该自定义域名路由，使用 `workers.dev` 地址。
+
+在 PowerShell 中执行：
 
 ```powershell
 npm ci
@@ -138,7 +201,9 @@ npx wrangler deploy --dry-run
 npm run deploy
 ```
 
-`secret put` 会交互式提示输入密钥，避免将它直接写进命令历史。也可以在 Cloudflare 控制台的对应 Worker → Settings → Variables and Secrets 中管理。`deploy --dry-run` 只校验构建，不发布；确认配置后再执行 `npm run deploy`。
+`secret put` 会交互式提示输入密钥。若大模型服务确实无需鉴权，可跳过 `LLM_API_KEY` 的设置；`JEV_API_KEY` 必须配置。也可以在 Cloudflare 控制台的对应 Worker → Settings → Variables and Secrets 中管理，密钥类型选择 Secret。
+
+`deploy --dry-run` 只校验打包，不发布，也不验证密钥或上游模型连通性。`npm run deploy` 才会发布。普通参数建议统一维护在 `wrangler.jsonc` 中，避免只改控制台后被下一次部署覆盖。
 
 当前访问地址为 **[https://jev-to-answer.skrtao.de](https://jev-to-answer.skrtao.de)**（`workers.dev` 地址仍可用）。
 
@@ -154,7 +219,27 @@ npm run cf:dev
 
 **旧配置迁移：** 新版本不再读取本地 `data/config.json` 或 Cloudflare `CONFIG` KV，也不会删除其中的旧数据。升级前由管理员将旧模型参数和密钥手动迁移到 `.env` 或 Workers 环境变量／Secrets；未迁移时页面会显示“暂未就绪”。
 
-### 免费使用额度
+### 验证配置与排查问题
+
+本地启动后，在另一个 PowerShell 窗口检查服务状态：
+
+```powershell
+Invoke-RestMethod -Uri 'http://localhost:9001/api/status'
+```
+
+线上验证时将地址替换成自己的站点域名。返回 `ok: true`、`ready: true` 只表示大模型地址、模型名称与当前 Jev 密钥已填写，**不代表密钥有效、余额充足或上游接口连通**。随后在页面提交一个有明确取舍的问题，才能验证大模型生成、Jev 决策和结果解读的完整链路；这一步会使用模型额度。
+
+| 现象 | 优先检查 |
+| :--- | :--- |
+| 页面显示暂未就绪，或 `ready: false` | `LLM_BASE_URL`、`LLM_MODEL`、`JEV_API_KEY` 是否在当前运行环境中配置；本地修改后是否重启 |
+| 已就绪，但生成回答失败 | 大模型地址是否为兼容 API 基础地址；模型 ID、密钥、余额及调用参数是否受支持 |
+| 生成选项成功，但没有得到 Jev 选择 | Jev 通道、密钥、地址与模型是否属于同一平台；账号是否有访问权限与可用额度 |
+| 切换 Jev 通道后失败 | 是否仍保留旧通道的 `JEV_BASE_URL`、`JEV_MODEL` 或密钥 |
+| 本地正常，线上失败 | 是否只填写了 `.env` / `.dev.vars`，没有配置线上 Secrets；模型服务是否能被 Worker 访问 |
+| 返回 `429` | 本站请求额度是否用尽；上游服务限流也可能表现为业务接口调用失败 |
+| `/api/config` 或 `/api/models` 返回 `404` | 这是预期行为，当前版本已关闭配置与调试接口 |
+
+### 使用额度与费用
 
 Cloudflare 使用 Durable Object 持久化计数，默认限制如下，可通过普通环境变量调整：
 
@@ -167,14 +252,6 @@ Cloudflare 使用 Durable Object 持久化计数，默认限制如下，可通�
 每日额度按 **UTC 日期**重置。一次决策回答会请求两个业务接口，可能调用三次上游模型；普通问答只请求一次回答接口和一次大模型。重试、补充和追问会继续使用额度，失败的业务请求也占额度。因此接口额度不是回答条数，也不是金额上限。请同时在模型服务平台设置消费上限。
 
 本地 Node.js 服务使用内存计数，重启后清零；经过反向代理时，访客可能因相同的代理地址共享 IP 额度。线上 Cloudflare 的持久化限额不会因 Worker 实例重启清零。
-
-### 3. 写下你的第一个问题
-
-选择分类，写下困惑，点击「翻开我的答案」。试着给它多一点背景：
-
-> 忙碌了一周，有点疲惫，但也想换换心情。这个周末该出去走走，还是留在家好好休息？预算不多，希望周一能恢复精神。
-
-得到答案后，可以继续问「如果只有半天时间，该怎么安排？」，或者收藏这一页，留给以后重读。
 
 ## 它如何给出答案
 
@@ -288,9 +365,13 @@ npm test
 
 </details>
 
+
+
 ## 致敬与鸣谢
 
 **致敬 `jev_demo` —— Jev 调试广场。**
+
+感谢 [Linux.do](https://linux.do/) 社区成员长期以来的支持与分享。
 
 原项目把「自然语言需求 → 大模型生成参数 → Jev 评估 → 结果可视化与解释」串成一条可以亲手探索的路径，也为 TypeSafe 与 Vercel 双通道接入提供了实践参考。
 
