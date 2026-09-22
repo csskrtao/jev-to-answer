@@ -122,6 +122,10 @@ const promptSets = [
 ];
 const HISTORY_KEY = "answer-book:history:v1";
 const DRAFT_KEY = "answer-book:draft:v1";
+const STYLE_KEY = "answer-book:style:v1";
+const STYLE_IDS = ["gentle", "roast", "concise", "humorous", "rational", "healing"];
+const normalizeStyle = (style) => STYLE_IDS.includes(style) ? style : "gentle";
+const styleLabel = (style) => state.styles.find((item) => item.id === normalizeStyle(style))?.label || ({ gentle: "温和版", roast: "毒舌版", concise: "干练版", humorous: "幽默版", rational: "理性版", healing: "治愈版" })[normalizeStyle(style)];
 // 旧历史没有 kind，仍按决策记录读取；直接回答不伪造选项和 Jev 决策。
 const isDirect = (record) => record?.options?.kind === "direct";
 const answerTitle = (record) => isDirect(record)
@@ -149,6 +153,12 @@ const state = {
   view: "home",
   busy: false,
   followupBusy: false,
+  styles: [{ id: "gentle", label: "温和版", description: "自然、清晰、体谅你的处境。" }],
+  stylesReady: false,
+  homeStyle: "gentle",
+  readerStyle: "gentle",
+  rewritePending: null,
+  followupRetry: null,
   ready: null,
   promptIndex: 0,
   current: null,
@@ -229,6 +239,12 @@ function restoreLocalData() {
             Number.isFinite(record.createdAt),
         )
         .slice(0, 100);
+    // 旧历史和未知风格统一按温和处理，不改变原有答案正文。
+    state.records.forEach((record) => {
+      record.style = normalizeStyle(record.style);
+      record.followups = validFollowups(record).map((message) => ({ ...message, style: normalizeStyle(message.style) }));
+    });
+    state.homeStyle = normalizeStyle(localStorage.getItem(STYLE_KEY));
     const draft = JSON.parse(localStorage.getItem(DRAFT_KEY) || "null");
     if (typeof draft?.question === "string")
       $("#question").value = draft.question.slice(0, 1000);
@@ -310,6 +326,8 @@ function setView(view) {
 }
 function setBusy(busy) {
   state.busy = busy;
+  $$("[data-style-select]").forEach((select) => { select.disabled = busy || !state.stylesReady; });
+  $$("[data-action='rewrite'],[data-action='retry-rewrite'],[data-action='retry-followup']").forEach((button) => { button.disabled = busy; });
   $("#question").disabled = busy;
   $("#ask-button").disabled = busy;
   $("#ask-button").innerHTML = busy
@@ -323,7 +341,7 @@ function setBusy(busy) {
   });
   if ($("#supplement-form")) $("#supplement-form").setAttribute("aria-busy", String(busy));
   $("#question-form").setAttribute("aria-busy", String(busy));
-  $("#reader-cancel").hidden = !busy || !state.followupBusy;
+  $("#reader-cancel").hidden = !busy || !(state.followupBusy || state.rewritePending);
   if (!busy && state.current && recordSupplements(state.current).length >= 5 && $("#supplement-send")) {
     $("#supplement-send").disabled = true;
     $("#supplement-input").disabled = true;
@@ -388,7 +406,7 @@ async function askQuestion(event) {
     showError("#form-error", "服务暂未就绪，请等待管理员配置后再试。");
     return;
   }
-  state.pending = { question, category: state.category, supplements: [], options: null };
+  state.pending = { question, category: state.category, supplements: [], options: null, style: state.stylesReady ? state.homeStyle : "gentle" };
   state.current = null;
   $("#result").hidden = true;
   await runJourney();
@@ -408,6 +426,7 @@ async function runJourney() {
           question: pending.question,
           category: categories[pending.category],
           supplements: pending.supplements || [],
+          style: pending.style,
         },
         signal: controller.signal,
       });
@@ -418,7 +437,7 @@ async function runJourney() {
     if (pending.options.kind !== "direct") {
       renderJourney("decide", pending.options);
       ({ decision } = await api("/api/book/decide", {
-        body: { question: pending.question, supplements: pending.supplements || [], options: pending.options },
+        body: { question: pending.question, supplements: pending.supplements || [], options: pending.options, style: pending.style },
         signal: controller.signal,
       }));
     }
@@ -428,6 +447,7 @@ async function runJourney() {
       createdAt: Date.now(),
       question: pending.question,
       category: pending.category,
+      style: pending.style,
       options: pending.options,
       decision,
       favorite: false,
@@ -498,6 +518,7 @@ async function askSupplement(event) {
     category: state.current.category,
     supplements: [...previous, supplement],
     parentId: state.current.id,
+    style: state.stylesReady ? state.readerStyle : "gentle",
     options: null,
   };
   await runJourney();
@@ -518,6 +539,9 @@ function renderResult(record) {
   // 打开新答案时从第一页开始；同一条记录重绘时保留当前页码和草稿。
   const openingNewPage = state.readerRecordId !== record.id;
   if (openingNewPage) {
+    state.readerStyle = normalizeStyle(record.conversationStyle || validFollowups(record).at(-1)?.style || record.style);
+    state.rewritePending = null;
+    state.followupRetry = null;
     state.readerRecordId = record.id;
     state.readerTab = "answer";
     state.followupPage = Math.max(0, validFollowups(record).length - 1);
@@ -544,10 +568,11 @@ function renderResult(record) {
         <div class="reader-context-bottom"><span>${escapeHTML(categories[record.category] || "日常小事")}${recordSupplements(record).length ? ` · 已结合 ${recordSupplements(record).length} 条补充` : ""}</span><time datetime="${new Date(record.createdAt).toISOString()}">${date}</time><span class="reader-ornament" aria-hidden="true">— ✧ —</span></div>
       </aside>
       <div class="reader-page">
+        <div class="reader-style-bar">${styleSelector("reader", state.readerStyle)}<div class="rewrite-actions"><button type="button" class="secondary-button" data-action="rewrite">按此风格重写</button><button type="button" class="text-button" data-action="retry-rewrite" hidden>重试重写</button></div><p id="rewrite-error" class="form-error" role="alert" hidden></p></div>
         <div class="reader-tabs" role="tablist" aria-label="翻阅答案">${tabs.map(([tab, label], index) => `<button type="button" role="tab" id="reader-tab-${tab}" class="reader-tab" data-reader-tab="${tab}" aria-controls="reader-panel-${tab}" aria-selected="false" tabindex="-1"><span class="reader-tab-number">0${index + 1}</span>${label}</button>`).join("")}</div>
         <div class="reader-panels">
           <section id="reader-panel-answer" class="reader-panel reader-scroll" data-reader-panel="answer" role="tabpanel" aria-labelledby="reader-tab-answer" tabindex="0">
-            <div class="reader-answer-kicker">${icon("sparkles")}${direct ? "对你问题的回答" : "Jev 为你翻到的答案"}</div>
+            <div class="reader-answer-kicker">${icon("sparkles")}${direct ? "对你问题的回答" : "Jev 为你翻到的答案"}<span class="style-badge">${escapeHTML(styleLabel(record.style))}</span></div>
             <h3 class="reader-answer-title">${escapeHTML(chosen.title)}</h3>
             ${direct ? "" : `<p class="reader-answer-description">${escapeHTML(chosen.description)}</p>`}
             <div class="reader-divider" aria-hidden="true">✦</div>
@@ -576,6 +601,71 @@ function renderResult(record) {
   renderFollowups(record);
   showReaderTab(state.readerTab);
   updateReaderResume();
+  setBusy(state.busy);
+}
+
+// 展示文案取自服务端目录；浏览器仅发送预设标识，不发送自定义提示词。
+function styleSelector(scope, selected) {
+  const description = state.styles.find((item) => item.id === selected)?.description || state.styles[0].description;
+  return `<div class="style-picker"><label for="${scope}-style">回复风格</label><select id="${scope}-style" data-style-select="${scope}" aria-describedby="${scope}-style-description" ${state.busy || !state.stylesReady ? "disabled" : ""}>${state.styles.map((item) => `<option value="${escapeHTML(item.id)}" ${item.id === selected ? "selected" : ""}>${escapeHTML(item.label)}</option>`).join("")}</select><p id="${scope}-style-description">${escapeHTML(state.stylesReady ? description : "风格目录暂未加载，当前使用温和版。")}</p></div>`;
+}
+async function loadStyles() {
+  try {
+    const { styles } = await api("/api/book/styles", { timeout: 10000 });
+    if (!Array.isArray(styles) || STYLE_IDS.some((id) => !styles.some((item) => item.id === id && typeof item.label === "string" && typeof item.description === "string"))) throw new Error("风格目录不完整");
+    state.styles = styles.filter((item) => STYLE_IDS.includes(item.id));
+    state.stylesReady = true;
+  } catch {
+    state.stylesReady = false;
+  }
+  $("#home-style-container").innerHTML = styleSelector("home", state.homeStyle);
+  // 目录响应较慢时只刷新选择器，避免重绘正在阅读的答案、追问草稿或错误提示。
+  const readerPicker = $("#reader-style")?.closest(".style-picker");
+  if (readerPicker) readerPicker.outerHTML = styleSelector("reader", state.readerStyle);
+}
+
+async function rewriteAnswer(retry = false) {
+  if (state.busy || !state.current) return;
+  // 重试保留提交时的风格快照，失败和取消均不写入原记录。
+  const pending = retry && state.rewritePending?.record.id === state.current.id
+    ? state.rewritePending
+    : { record: state.current, style: state.stylesReady ? state.readerStyle : "gentle" };
+  state.rewritePending = pending;
+  const controller = new AbortController();
+  state.controller = controller;
+  setBusy(true);
+  showError("#rewrite-error", "");
+  const button = $("[data-action='rewrite']");
+  button.textContent = "正在按此风格重写…";
+  try {
+    const { record, style } = pending;
+    const data = await api("/api/book/rewrite", {
+      body: { question: record.question, supplements: recordSupplements(record), options: record.options, ...(isDirect(record) ? {} : { decision: record.decision }), style },
+      signal: controller.signal,
+      timeout: 75000,
+    });
+    if (controller.signal.aborted) return;
+    const rewritten = { ...structuredClone(record), id: createRecordId(), parentId: record.id, createdAt: Date.now(), style: normalizeStyle(data.style || style), conversationStyle: style };
+    if (isDirect(rewritten)) rewritten.options.answer = data.answer;
+    else {
+      rewritten.decision.explanation = data.answer;
+      delete rewritten.decision.explanationUnavailable;
+    }
+    state.current = rewritten;
+    state.records = [rewritten, ...state.records].slice(0, 100);
+    state.rewritePending = null;
+    persistRecords();
+    renderResult(rewritten);
+    if (state.view !== "home") renderHistory();
+    toast("已另存一条新答案，原答案和追问仍可回看。");
+  } catch (error) {
+    showError("#rewrite-error", controller.signal.aborted ? "已取消重写，原答案未改变；可按原风格重试。" : readableError(error));
+    $("[data-action='retry-rewrite']").hidden = false;
+  } finally {
+    state.controller = null;
+    button.textContent = "按此风格重写";
+    setBusy(false);
+  }
 }
 
 function validFollowups(record) {
@@ -601,17 +691,17 @@ function renderFollowups(record, pendingQuestion) {
   $("[data-followup-page='1']").disabled = state.followupPage >= total - 1;
   // 每次只渲染当前一轮，翻页不会让整个页面继续变长。
   container.innerHTML = message
-    ? `<div class="followup-turn"><div class="chat-question"><span>你的追问 · ${state.followupPage + 1}</span><p>${escapeHTML(message.question)}</p></div><div class="chat-answer"><span>${icon("sparkles")}答案之书 · AI 解读</span><p>${formatProse(message.answer)}</p></div></div>`
+    ? `<div class="followup-turn"><div class="chat-question"><span>你的追问 · ${state.followupPage + 1}</span><p>${escapeHTML(message.question)}</p></div><div class="chat-answer"><span>${icon("sparkles")}答案之书 · ${escapeHTML(styleLabel(message.style))}</span><p>${formatProse(message.answer)}</p></div></div>`
     : pendingQuestion
       ? `<div class="followup-turn"><div class="chat-question"><span>你的追问</span><p>${escapeHTML(pendingQuestion)}</p></div><div class="chat-answer chat-thinking"><span class="spinner"></span>正在结合前面的对话思考…<button type="button" class="text-button" data-action="cancel">取消</button></div></div>`
       : `<div class="reader-chat-empty">${icon("book-open")}<h3>一个答案，也可以是对话的开始。</h3><p>${isDirect(record) ? "想了解更多，或补充具体情况？" : "为什么这样选，下一步怎么做？"}<br>你的每次追问，都会成为一张新的卡片。</p></div>`;
   container.scrollTop = 0;
 }
-async function askFollowup(event) {
+async function askFollowup(event, retry = false) {
   event?.preventDefault();
   if (state.busy || !state.current) return;
   const input = $("#followup-input");
-  const followUp = input.value.trim();
+  const followUp = retry && state.followupRetry?.recordId === state.current.id ? state.followupRetry.followUp : input.value.trim();
   if (!followUp) {
     showError("#followup-error", "写下想深入了解的内容，我们接着聊。");
     input.focus();
@@ -624,6 +714,8 @@ async function askFollowup(event) {
   const record = state.current;
   const controller = new AbortController();
   state.controller = controller;
+  const style = retry && state.followupRetry?.recordId === record.id ? state.followupRetry.style : state.stylesReady ? state.readerStyle : "gentle";
+  state.followupRetry = { recordId: record.id, followUp, style };
   state.followupBusy = true;
   setBusy(true);
   showError("#followup-error", "");
@@ -644,8 +736,10 @@ async function askFollowup(event) {
         supplements: recordSupplements(record),
         options: record.options,
         decision: record.decision,
-        messages: validFollowups(record).slice(-6),
+        // 服务端上下文只需问题和答案；风格元数据仅用于本地展示。
+        messages: validFollowups(record).slice(-6).map(({ question, answer }) => ({ question, answer })),
         followUp,
+        style,
       },
       signal: controller.signal,
       timeout: 75000,
@@ -653,9 +747,11 @@ async function askFollowup(event) {
     if (controller.signal.aborted) return;
     record.followups = [
       ...validFollowups(record),
-      { question: followUp, answer },
+      { question: followUp, answer, style },
     ].slice(-20);
     state.pendingFollowup = null;
+    record.conversationStyle = style;
+    state.followupRetry = null;
     state.followupPage = record.followups.length - 1;
     state.followupDrafts.delete(record.id);
     persistRecords();
@@ -676,6 +772,10 @@ async function askFollowup(event) {
       );
   } finally {
     state.followupBusy = false;
+    if (state.followupRetry && $("#followup-error")) {
+      $("#followup-error").hidden = false;
+      $("#followup-error").insertAdjacentHTML("beforeend", '<button type="button" class="text-button" data-action="retry-followup">按原风格重试追问</button>');
+    }
     state.controller = null;
     setBusy(false);
     input.disabled = false;
@@ -729,7 +829,7 @@ function renderHistory() {
     ? records
         .map((record) => {
           const title = answerTitle(record);
-          return `<article class="history-card"><div class="history-meta"><span>${escapeHTML(categories[record.category] || "日常小事")}${recordSupplements(record).length ? ` · 补充 ${recordSupplements(record).length} 次` : ""}</span><time datetime="${new Date(record.createdAt).toISOString()}">${new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(record.createdAt)}</time></div><h3>${escapeHTML(record.question)}</h3><div class="history-answer">${icon("sparkles")}${escapeHTML(title)}</div><div class="history-actions"><button class="text-button delete-record" data-delete="${escapeHTML(record.id)}" aria-label="删除这条答案">${icon("trash")}</button><button class="secondary-button ${record.favorite ? "is-saved" : ""}" data-favorite="${escapeHTML(record.id)}" aria-label="${record.favorite ? "取消收藏" : "收藏这条答案"}" aria-pressed="${!!record.favorite}">${icon("bookmark")}</button><button class="secondary-button" data-record="${escapeHTML(record.id)}">重读这一页${icon("arrow")}</button></div></article>`;
+          return `<article class="history-card"><div class="history-meta"><span>${escapeHTML(categories[record.category] || "日常小事")} · ${escapeHTML(styleLabel(record.style))}${recordSupplements(record).length ? ` · 补充 ${recordSupplements(record).length} 次` : ""}</span><time datetime="${new Date(record.createdAt).toISOString()}">${new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(record.createdAt)}</time></div><h3>${escapeHTML(record.question)}</h3><div class="history-answer">${icon("sparkles")}${escapeHTML(title)}</div><div class="history-actions"><button class="text-button delete-record" data-delete="${escapeHTML(record.id)}" aria-label="删除这条答案">${icon("trash")}</button><button class="secondary-button ${record.favorite ? "is-saved" : ""}" data-favorite="${escapeHTML(record.id)}" aria-label="${record.favorite ? "取消收藏" : "收藏这条答案"}" aria-pressed="${!!record.favorite}">${icon("bookmark")}</button><button class="secondary-button" data-record="${escapeHTML(record.id)}">重读这一页${icon("arrow")}</button></div></article>`;
         })
         .join("")
     : `<div class="empty-state"><span>${icon(search ? "search" : favorites ? "bookmark" : "book-open")}</span><h3>${search ? "还没找到这一页" : favorites ? "为触动你的答案，折一个角" : "你的故事，从第一个问题开始"}</h3><p>${search ? "试试其他关键词，或清空搜索。" : favorites ? "在答案下点击「收藏启示」，就能在这里重温。" : "写下此刻的困惑，答案会被收录在这里。"}</p>${search ? '<button class="secondary-button" data-action="clear-search">清空搜索</button>' : '<button class="primary-button" data-view="home">翻开第一个答案' + icon("arrow") + "</button>"}</div>`;
@@ -744,6 +844,8 @@ function newQuestion() {
     return;
   }
   state.current = null;
+  state.rewritePending = null;
+  state.followupRetry = null;
   state.pending = null;
   state.supplementOpen = null;
   state.readerRecordId = null;
@@ -765,13 +867,13 @@ async function copyAnswer() {
   );
   const conversation = validFollowups(record)
     .map(
-      (message) => `\n\n追问：${message.question}\nAI 解读：${message.answer}`,
+      (message) => `\n\n追问（${styleLabel(message.style)}）：${message.question}\nAI 解读：${message.answer}`,
     )
     .join("");
   const supplements = recordSupplements(record).map((item, index) => `\n\n补充 ${index + 1}：${item}`).join("");
   const text = isDirect(record)
-    ? `答案之书\n\n我的问题：${record.question}${supplements}\n\n${answerTitle(record)}\n${answerBody(record)}${conversation}`
-    : `答案之书 · 遇事不决，Jev 解决\n\n我的问题：${record.question}${supplements}\n\nJev 的选择：${choice.title}\n${choice.description}\n\n${record.decision.explanation}${conversation}\n\n答案是启发，选择始终在你。`;
+    ? `答案之书 · ${styleLabel(record.style)}\n\n我的问题：${record.question}${supplements}\n\n${answerTitle(record)}\n${answerBody(record)}${conversation}`
+    : `答案之书 · ${styleLabel(record.style)} · 遇事不决，Jev 解决\n\n我的问题：${record.question}${supplements}\n\nJev 的选择：${choice.title}\n${choice.description}\n\n${record.decision.explanation}${conversation}\n\n答案是启发，选择始终在你。`;
   try {
     await navigator.clipboard.writeText(text);
     toast("答案已复制，带着它迈出下一步。");
@@ -848,6 +950,8 @@ document.addEventListener("click", (event) => {
     );
     if (record) {
       state.current = record;
+      // 从历史重读时恢复实际最近一轮风格，丢弃尚未提交的阅读器选择。
+      state.readerRecordId = null;
       state.pending = null;
       setView("home");
       $("#question").value = record.question;
@@ -897,7 +1001,10 @@ document.addEventListener("click", (event) => {
     state.pending = null;
     renderResult(state.current);
   }
-  if (action === "refresh-status") loadStatus();
+  if (action === "refresh-status") {
+    loadStatus();
+    if (!state.stylesReady && !state.busy) loadStyles();
+  }
   if (action === "cancel") state.controller?.abort();
   if (action === "retry") {
     if (state.pending?.parentId) {
@@ -917,6 +1024,9 @@ document.addEventListener("click", (event) => {
   }
   if (action === "favorite-current" && state.current)
     toggleFavorite(state.current.id);
+  if (action === "rewrite") rewriteAnswer();
+  if (action === "retry-rewrite") rewriteAnswer(true);
+  if (action === "retry-followup") askFollowup(undefined, true);
   if (action === "copy") copyAnswer();
   if (action === "new") newQuestion();
   if (action === "clear-search") {
@@ -945,6 +1055,16 @@ document.addEventListener("input", (event) => {
   if (event.target.id === "followup-input" && state.current) {
     state.followupDrafts.set(state.current.id, event.target.value);
   }
+});
+document.addEventListener("change", (event) => {
+  const scope = event.target.dataset.styleSelect;
+  if (!scope || state.busy || !state.stylesReady) return;
+  const style = normalizeStyle(event.target.value);
+  if (scope === "home") {
+    state.homeStyle = style;
+    try { localStorage.setItem(STYLE_KEY, style); } catch { /* 存储不可用时仍保留本次页面偏好。 */ }
+  } else state.readerStyle = style;
+  $(`#${scope}-style-description`).textContent = state.styles.find((item) => item.id === style).description;
 });
 document.addEventListener("keydown", (event) => {
   // 标准页签键盘行为：左右键切页，Home / End 到首尾，Tab 进入当前内容。
@@ -979,6 +1099,8 @@ $("#shuffle-prompts").addEventListener("click", () => {
 $("#history-search").addEventListener("input", renderHistory);
 hydrateIcons();
 restoreLocalData();
+$("#home-style-container").innerHTML = styleSelector("home", state.homeStyle);
+loadStyles();
 selectCategory(state.category);
 updateCounts();
 renderPrompts();

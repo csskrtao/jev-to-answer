@@ -1,3 +1,11 @@
+/* 风格使用原生下拉框，键盘和触屏均可直接选择，颜色随主题变量变化。 */
+.home-style-container { margin-bottom: 20px; }
+.style-picker { display: grid; grid-template-columns: auto minmax(100px, 150px); align-items: center; gap: 8px 12px; }
+.style-picker label { font-size: 13px; font-weight: 600; }
+.style-picker select { width: 100%; min-height: 38px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: var(--surface); }
+.style-picker p { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.style-picker select:disabled { opacity: .65; cursor: not-allowed; }
+.style-badge { display: inline-block; padding: 3px 8px; border-radius: 5px; font-size: 11px; color: var(--green); background: var(--sidebar); white-space: nowrap; }
 /* 暖纸色与陶土色作为全站基调，桌面和手机共用同一套设计变量。 */
 :root {
   --paper: #f8f7f3;

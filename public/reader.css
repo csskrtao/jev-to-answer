@@ -1,3 +1,18 @@
+/* 风格操作固定在书页上方，切换不发送请求，也不重标旧答案。 */
+.reader-dialog .reader-style-bar { flex: 0 0 auto; display: flex; align-items: flex-start; flex-wrap: wrap; gap: 8px 16px; padding: 12px 26px 0; }
+.reader-dialog .reader-style-bar .style-picker { flex: 1 1 210px; grid-template-columns: auto minmax(100px, 145px); }
+.reader-dialog .reader-style-bar select { background: var(--reader-paper); color: var(--reader-ink); border-color: var(--reader-line); }
+.reader-dialog .reader-style-bar .style-picker p { color: var(--reader-muted); }
+.reader-dialog .rewrite-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.reader-dialog .reader-style-bar .form-error { flex-basis: 100%; margin: 0; max-height: 65px; overflow: auto; }
+.reader-dialog .reader-answer-kicker { flex-wrap: wrap; }
+.reader-dialog .style-badge { color: var(--reader-green); background: var(--reader-green-soft); }
+@media (max-width: 700px) {
+  .reader-dialog .reader-style-bar { padding: 10px 14px 0; gap: 6px 10px; }
+  .reader-dialog .reader-style-bar .style-picker { flex-basis: 170px; gap: 4px 8px; }
+  .reader-dialog .reader-style-bar .secondary-button { padding: 8px; font-size: 11px; }
+  .reader-dialog .reader-style-bar .style-picker p { font-size: 11px; }
+}
 /* 阅读器单独限定高度：翻页、追问都在书页内完成，页面不再随回答不断拉长。 */
 body:has(.reader-dialog[open]) {
   overflow: hidden;
