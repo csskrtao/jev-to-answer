@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f8f7f3">
+  <meta name="description" content="随机上帝模式的两版动画实验：让同一个答案，以两种方式落下。">
+  <title>随机实验室 · 答案之书</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <script src="/theme.js"></script>
+  <link rel="stylesheet" href="/random-preview.css">
+  <link rel="stylesheet" href="/random-light.css">
+  <script type="module" src="/random-preview.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#play-comparison">跳到播放对比</a>
+  <header class="lab-header">
+    <a class="lab-brand" href="/" aria-label="返回答案之书首页"><span class="brand-mark">✳</span><span>答案之书<small>THE BOOK OF ANSWERS</small></span></a>
+    <div class="header-tools"><span class="lab-badge"><i></i>动画演示</span><label class="theme-label">主题<select id="theme-select"><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></label></div>
+  </header>
+  <main class="lab-main">
+    <section class="intro" aria-labelledby="page-title">
+      <div class="intro-copy"><p class="eyebrow">THE RANDOM LAB <span>／ 01</span></p><h1 id="page-title">把这一刻，<span>交给随机。</span></h1><p class="intro-description">一个答案，两种落下的方式。先看看，你更喜欢哪一种仪式感。</p></div>
+      <div class="intro-seal" aria-hidden="true"><span>LET IT</span><b>✧</b><span>HAPPEN</span></div>
+    </section>
+    <section class="experiment" aria-label="动画比较实验">
+      <div class="sample-bar"><div><span class="section-label">选择一个小实验</span><span class="sample-hint">按候选数量变换道具</span></div><div id="sample-tabs" class="sample-tabs" role="group" aria-label="候选数量与道具"></div></div>
+      <div class="question-row"><div><span class="question-label">这次的问题</span><h2 id="sample-question"></h2></div><span id="odds-label" class="odds-label"></span></div>
+      <div class="comparison-grid">
+        <article class="version-card" aria-labelledby="light-title">
+          <div class="version-heading"><span class="version-letter">A</span><div><h3 id="light-title">立体轻动画</h3><p>轻盈、柔和，像翻开一页书。</p></div><span class="version-tag">CSS 3D</span></div>
+          <div class="stage-wrap light-stage-wrap"><span class="stage-note" aria-hidden="true">A LITTLE CHANCE</span><div id="light-stage" class="animation-stage" role="img" aria-label="立体轻动画道具"></div><span class="stage-caption">翻转 · 滚动 · 轻轻落定</span></div>
+          <div id="light-result" class="result-slot"><span class="result-spark">✧</span><p>答案，还藏在可能里。<small>播放后在这里揭晓</small></p></div>
+        </article>
+        <article class="version-card" aria-labelledby="physics-title">
+          <div class="version-heading"><span class="version-letter physics-letter">B</span><div><h3 id="physics-title">物理 3D</h3><p>正对你的那一面，就是这次的答案。</p></div><span class="version-tag">已选用</span></div>
+          <div class="stage-wrap physics-stage-wrap"><span class="stage-note" aria-hidden="true">A TOUCH OF GRAVITY</span><div id="physics-stage" class="animation-stage" role="img" aria-label="物理 3D 动画道具"></div><p id="physics-error" class="physics-error" role="status" hidden></p><span class="stage-caption">光影 · 碰撞 · 弹跳落地</span></div>
+          <div id="physics-result" class="result-slot"><span class="result-spark">✧</span><p>答案，还藏在可能里。<small>播放后在这里揭晓</small></p></div>
+        </article>
+      </div>
+      <div class="play-bar"><div class="play-help"><span class="status-orbit" aria-hidden="true">✳</span><p id="play-status" role="status" aria-live="polite">同一组候选，同一个随机结果。<small>两版同时播放，让感觉来做选择。</small></p></div><button id="play-comparison" class="play-button" type="button" disabled><span aria-hidden="true">↗</span><span id="play-label">准备道具中</span></button></div>
+      <p id="reduced-note" class="reduced-note" hidden>已跟随系统减少动态效果，直接呈现落定的答案。</p>
+      <div class="candidate-section"><div class="candidate-heading"><h3>每一种可能，都在这里</h3><span id="candidate-count"></span></div><ol id="candidate-list" class="candidate-list"></ol></div>
+    </section>
+    <footer class="lab-footer"><p><span>✦</span> 随机，是给犹豫一个小小的推力。</p><small>此页使用固定示例，不调用 AI。演示可重复播放；正式模式每轮自动投掷一次，不提供重投。</small><small>3D 的碰撞表现与等概率抽签分开计算，最终收束到抽中的答案。</small></footer>
+  </main>
+</body>
+</html>

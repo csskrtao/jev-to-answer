@@ -1,0 +1,29 @@
+/* 场景只使用局部类名，避免影响现有问答页。 */
+.rl-scene { position: relative; height: 100%; min-height: 295px; overflow: hidden; perspective: 780px; isolation: isolate; }
+.rl-floor { position: absolute; left: 8%; right: 8%; bottom: 56px; height: 100px; border-radius: 50%; background: radial-gradient(ellipse, color-mix(in srgb, var(--green) 12%, transparent), transparent 70%); transform: scaleY(.45); }
+.rl-shadow { position: absolute; width: 145px; height: 24px; left: 50%; top: calc(50% + 80px); transform: translateX(-50%); border-radius: 50%; background: var(--ink); filter: blur(11px); opacity: .2; }
+.rl-lifter { position: absolute; left: 50%; top: calc(50% - 12px); width: 0; height: 0; transform-style: preserve-3d; }
+.rl-rotor { width: 0; height: 0; transform-style: preserve-3d; }
+.rl-face { position: absolute; left: 0; top: 0; transform-origin: 0 0; backface-visibility: hidden; background: var(--surface, #fffefa); background-image: linear-gradient(140deg, color-mix(in srgb, var(--green) 12%, transparent), transparent 55%, color-mix(in srgb, var(--accent) 18%, transparent)); color: var(--ink, #343b35); border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--line)); box-shadow: inset 0 0 18px color-mix(in srgb, var(--accent) 16%, transparent); transition: background-color .3s; }
+.rl-face-label { position: absolute; transform: translate(-50%, -50%); width: 76px; text-align: center; font-size: 15px; line-height: 1.5; font-weight: 650; word-break: break-all; text-wrap: balance; }
+.rl-triangle .rl-face-label { width: 61px; font-size: 13px; }
+.rl-edge { background: color-mix(in srgb, var(--accent) 30%, var(--surface)); }
+.rl-coin-face { background-color: color-mix(in srgb, var(--accent) 16%, var(--surface)); box-shadow: inset 0 0 0 8px color-mix(in srgb, var(--accent) 16%, transparent), inset 0 0 0 10px color-mix(in srgb, var(--accent) 40%, transparent); border-radius: 50%; }
+.rl-coin-face .rl-face-label { font-size: 19px; width: 100px; }
+.rl-face.rl-selected { background-color: color-mix(in srgb, var(--green) 24%, var(--surface)); color: var(--ink); }
+.rl-status { position: absolute; bottom: 15px; left: 15px; right: 15px; text-align: center; font-size: 12px; line-height: 1.6; color: var(--muted); overflow-wrap: anywhere; }
+.rl-scene[data-result-index] .rl-status { color: var(--green); }
+.rl-wheel { position: absolute; left: -126px; top: -126px; width: 252px; height: 252px; overflow: visible; filter: drop-shadow(0 7px 0 color-mix(in srgb, var(--accent) 25%, var(--line))); }
+.rl-sector path { fill: var(--surface); stroke: color-mix(in srgb, var(--accent) 38%, var(--line)); stroke-width: 1; }
+.rl-sector-alternate path { fill: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
+.rl-sector text { fill: var(--ink); font-family: inherit; font-size: 11px; font-weight: 600; }
+.rl-sector.rl-selected path { fill: color-mix(in srgb, var(--green) 35%, var(--surface)); }
+.rl-wheel-hub { fill: var(--accent); stroke: var(--surface); stroke-width: 4; }
+.rl-pointer { display: none; position: absolute; z-index: 2; left: calc(50% - 9px); top: calc(50% - 139px); width: 18px; height: 22px; background: var(--accent); clip-path: polygon(0 0,100% 0,50% 100%); }
+.rl-is-wheel .rl-pointer { display: block; }
+.rl-is-wheel .rl-shadow { width: 218px; top: calc(50% + 101px); }
+.rl-is-wheel .rl-floor { bottom: 38px; }
+@media (max-width: 420px) { .rl-status { font-size: 11px; } }
+/* 动态偏好也由控制器传入，CSS 规则覆盖颜色渐变的补间。 */
+@media (prefers-reduced-motion: reduce) { .rl-face { transition: none; } }
+@supports not (transform-style: preserve-3d) { .rl-face { display: none; } .rl-face.rl-selected { display: block; transform: translate(-50%,-50%) !important; clip-path: none !important; } }
