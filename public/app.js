@@ -349,7 +349,7 @@ function setBusy(busy) {
   updateReaderResume();
 }
 
-// 合上书本不会中断请求；可以继续编辑首页或通过入口回到同一页。
+// 阅读既有答案时可以合上再重读；新一轮选择则在关闭时取消等待。
 function updateReaderResume() {
   $("#resume-reader").hidden = !state.current && !state.pending;
   $("#resume-reader-label").textContent = state.busy ? "回到正在翻开的这一页" : "继续阅读这一页";
@@ -360,6 +360,8 @@ function openReader() {
   updateReaderResume();
 }
 function closeReader() {
+  // 关闭本轮选择时取消等待，避免后台结果在离开后自动写入历史。
+  if (state.pending && state.busy) state.controller?.abort();
   $("#reader-dialog").close();
   updateReaderResume();
 }
@@ -381,12 +383,47 @@ function showReaderTab(tab, focus = false) {
   const index = tabs.findIndex((button) => button.dataset.readerTab === tab);
   if ($("#reader-page-number")) $("#reader-page-number").textContent = `0${index + 1} / 0${tabs.length}`;
 }
+// 使用数字编号，避免超过 26 个候选时字母编号变成标点。
+// 用户倾向仅用于本地展示，不拼入模型的候选或请求。
+function userChoiceLabel(record) {
+  if (isDirect(record)) return "";
+  if (record.userChoiceId === "hesitate") return "犹豫";
+  return record.options?.choices?.find((choice) => choice.id === record.userChoiceId)?.title || "";
+}
+function renderUserChoice(pending) {
+  $("#journey").hidden = false;
+  $("#result").hidden = true;
+  const choices = [...pending.options.choices, { id: "hesitate", title: "犹豫", description: "我暂时还无法判断，先看看 Jev 怎么建议。" }];
+  $("#journey").innerHTML = `<h3>先听听你自己的想法。</h3><p>Jev 正在后台独立权衡，确认后再揭晓建议。</p><fieldset class="user-choice-list"><legend>你现在更倾向于哪一个？</legend>${choices.map((choice) => `<label class="user-choice"><input type="radio" name="user-choice" value="${escapeHTML(choice.id)}" ${pending.userChoiceId === choice.id ? "checked" : ""}><span><strong>${escapeHTML(choice.title)}</strong><small>${escapeHTML(choice.description)}</small></span></label>`).join("")}</fieldset><div class="journey-actions"><button type="button" class="primary-button" data-action="confirm-choice" ${pending.userChoiceId ? "" : "disabled"}>确认选择，查看 Jev 的建议</button><button type="button" class="text-button" data-action="cancel">取消等待</button></div>`;
+}
+// 确认与后台请求独立进行；取消也必须结束这个 Promise，不能永久占用 busy。
+function waitForUserChoice(pending, signal) {
+  if (signal.aborted) return Promise.reject(new DOMException("已取消", "AbortError"));
+  if (pending.choiceConfirmed) return Promise.resolve();
+  renderUserChoice(pending);
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      signal.removeEventListener("abort", abort);
+      delete pending.confirmChoice;
+    };
+    const abort = () => { cleanup(); reject(new DOMException("已取消", "AbortError")); };
+    pending.confirmChoice = () => {
+      if (pending.userChoiceId !== "hesitate" && !pending.options.choices.some((choice) => choice.id === pending.userChoiceId)) return;
+      pending.choiceConfirmed = true;
+      cleanup();
+      renderJourney("decide", pending.options);
+      $("#journey .journey-top p").textContent = "已记下你的选择，正在等待 Jev 的建议与解读。";
+      resolve();
+    };
+    signal.addEventListener("abort", abort, { once: true });
+  });
+}
 function renderJourney(phase, options, error) {
   const element = $("#journey");
   const failed = phase === "error";
   element.hidden = false;
   $("#result").hidden = true;
-  element.innerHTML = `<div class="journey-book" aria-hidden="true"><span></span><span></span></div><span class="journey-kicker">A NEW CHAPTER IS WAITING</span><div class="journey-top">${failed ? icon("info") : '<span class="spinner"></span>'}<div><h3>${failed ? "答案还差最后一步" : phase === "options" ? "正在理解你的问题…" : "这一页，正在为你慢慢翻开…"}</h3><p>${failed ? escapeHTML(error) : phase === "options" ? "AI 正在识别你的提问，组织贴题的回答。" : "Jev 正在认真权衡，为你选出一个方向。"}</p></div></div>${options?.choices ? `<ul class="journey-options">${options.choices.map((choice, index) => `<li><small>${String.fromCharCode(65 + index)}</small>${escapeHTML(choice.title)}</li>`).join("")}</ul>` : ""}<div class="journey-progress" aria-label="生成进度"><span class="${options ? "is-complete" : "is-current"}">01 理解问题</span><span class="${options ? "is-current" : ""}">02 翻开答案</span></div><div class="journey-actions">${failed ? '<button class="secondary-button" data-action="retry">' + icon("refresh") + '重试这一步</button><button class="text-button" data-action="' + (state.current ? "back-to-answer" : "close-reader") + '">' + (state.current ? "返回原答案" : "返回修改问题") + '</button>' : '<button class="text-button" data-action="cancel">取消等待</button>'}</div>`;
+  element.innerHTML = `<div class="journey-book" aria-hidden="true"><span></span><span></span></div><span class="journey-kicker">A NEW CHAPTER IS WAITING</span><div class="journey-top">${failed ? icon("info") : '<span class="spinner"></span>'}<div><h3>${failed ? "答案还差最后一步" : phase === "options" ? "正在理解你的问题…" : "这一页，正在为你慢慢翻开…"}</h3><p>${failed ? escapeHTML(error) : phase === "options" ? "AI 正在识别你的提问，组织贴题的回答。" : "Jev 正在认真权衡，为你选出一个方向。"}</p></div></div>${options?.choices ? `<ul class="journey-options">${options.choices.map((choice, index) => `<li><small>${index + 1}</small>${escapeHTML(choice.title)}</li>`).join("")}</ul>` : ""}<div class="journey-progress" aria-label="生成进度"><span class="${options ? "is-complete" : "is-current"}">01 理解问题</span><span class="${options ? "is-current" : ""}">02 翻开答案</span></div><div class="journey-actions">${failed ? '<button class="secondary-button" data-action="retry">' + icon("refresh") + '重试这一步</button><button class="text-button" data-action="' + (state.current ? "back-to-answer" : "close-reader") + '">' + (state.current ? "返回原答案" : "返回修改问题") + '</button>' : '<button class="text-button" data-action="cancel">取消等待</button>'}</div>`;
 }
 async function askQuestion(event) {
   event?.preventDefault();
@@ -431,17 +468,29 @@ async function runJourney() {
         signal: controller.signal,
       });
       pending.options = data.options;
+      // 模型可能偶然使用保留字作 ID；仅重命名该候选，避免与本地「犹豫」混淆。
+      if (pending.options.choices?.some((choice) => choice.id === "hesitate")) {
+        let suffix = 1;
+        while (pending.options.choices.some((choice) => choice.id === `user_option_${suffix}`)) suffix++;
+        pending.options.choices = pending.options.choices.map((choice) => choice.id === "hesitate" ? { ...choice, id: `user_option_${suffix}` } : choice);
+      }
     }
+    if (controller.signal.aborted) throw new DOMException("已取消", "AbortError");
     let decision = null;
     // 评价、事实和闲聊已经有直接回复，仅选择问题才进入 Jev。
     if (pending.options.kind !== "direct") {
-      renderJourney("decide", pending.options);
-      ({ decision } = await api("/api/book/decide", {
+      // 提前接住上游错误，用户确认前既不泄露结果，也不产生未处理的拒绝。
+      const decisionRequest = api("/api/book/decide", {
         body: { question: pending.question, supplements: pending.supplements || [], options: pending.options, style: pending.style },
         signal: controller.signal,
-      }));
+      }).then((data) => ({ data }), (error) => ({ error }));
+      if (pending.choiceConfirmed) renderJourney("decide", pending.options);
+      await waitForUserChoice(pending, controller.signal);
+      const outcome = await decisionRequest;
+      if (outcome.error) throw outcome.error;
+      ({ decision } = outcome.data);
     }
-    if (controller.signal.aborted) return;
+    if (controller.signal.aborted) throw new DOMException("已取消", "AbortError");
     const record = {
       id: createRecordId(),
       createdAt: Date.now(),
@@ -450,6 +499,7 @@ async function runJourney() {
       style: pending.style,
       options: pending.options,
       decision,
+      ...(decision ? { userChoiceId: pending.userChoiceId } : {}),
       favorite: false,
       ...(pending.parentId ? { parentId: pending.parentId } : {}),
     };
@@ -550,10 +600,11 @@ function renderResult(record) {
   const suggestions = direct
     ? [["能具体解释一下刚才的回答吗？", "展开说说"], ["这个回答的依据是什么？有哪些不能确定的地方？", "依据是什么？"], ["从另一个角度看，还有什么可能被忽略的因素？", "换个角度"]]
     : [["为什么更推荐这个选择？有哪些需要留意的地方？", "为什么这样选？"], ["如果决定这样做，我可以从哪些具体的小步骤开始？", "该怎么开始？"], ["从另一个角度看，还有什么可能被忽略的因素？", "换个角度"]];
+  // 完整展示全部候选，数字编号与生成进度保持一致。
   const choices = (direct ? [] : options.choices).map((choice, index) => {
     const selected = choice.id === decision.choiceId;
     const percent = hasProbabilities ? Math.round(decision.probabilities[choice.id] * 1000) / 10 : null;
-    return `<details class="reader-choice ${selected ? "chosen" : ""}" ${selected ? "open" : ""}><summary class="choice-title"><span class="choice-letter">${String.fromCharCode(65 + index)}</span><b>${escapeHTML(choice.title)}</b>${selected ? icon("check") : ""}${hasProbabilities ? `<span class="choice-percent">${percent}%</span>` : ""}${icon("chevron")}</summary><p class="choice-description">${escapeHTML(choice.description)}</p>${hasProbabilities ? `<div class="probability-track" aria-hidden="true"><div class="probability-fill" style="width:${percent}%"></div></div>` : ""}</details>`;
+    return `<details class="reader-choice ${selected ? "chosen" : ""}" ${selected ? "open" : ""}><summary class="choice-title"><span class="choice-letter">${index + 1}</span><b>${escapeHTML(choice.title)}</b>${selected ? icon("check") : ""}${hasProbabilities ? `<span class="choice-percent">${percent}%</span>` : ""}${icon("chevron")}</summary><p class="choice-description">${escapeHTML(choice.description)}</p>${hasProbabilities ? `<div class="probability-track" aria-hidden="true"><div class="probability-fill" style="width:${percent}%"></div></div>` : ""}</details>`;
   }).join("");
   const date = new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "long", day: "numeric" }).format(record.createdAt);
   $("#journey").hidden = true;
@@ -574,6 +625,7 @@ function renderResult(record) {
           <section id="reader-panel-answer" class="reader-panel reader-scroll" data-reader-panel="answer" role="tabpanel" aria-labelledby="reader-tab-answer" tabindex="0">
             <div class="reader-answer-kicker">${icon("sparkles")}${direct ? "对你问题的回答" : "Jev 为你翻到的答案"}<span class="style-badge">${escapeHTML(styleLabel(record.style))}</span></div>
             <h3 class="reader-answer-title">${escapeHTML(chosen.title)}</h3>
+            ${!direct && userChoiceLabel(record) ? `<div class="choice-comparison"><div><small>你的选择</small><strong>${escapeHTML(userChoiceLabel(record))}</strong></div><div><small>Jev 的建议</small><strong>${escapeHTML(chosen.title)}</strong></div><p>${record.userChoiceId === "hesitate" ? "你选择先保留判断，Jev 给出了一个方向。" : record.userChoiceId === decision.choiceId ? "这次你们想到一起了。" : "Jev 提供了另一个值得考虑的方向。"}</p></div>` : ""}
             ${direct ? "" : `<p class="reader-answer-description">${escapeHTML(chosen.description)}</p>`}
             <div class="reader-divider" aria-hidden="true">✦</div>
             <p class="reader-explanation">${formatProse(answerBody(record))}</p>
@@ -871,9 +923,11 @@ async function copyAnswer() {
     )
     .join("");
   const supplements = recordSupplements(record).map((item, index) => `\n\n补充 ${index + 1}：${item}`).join("");
+  const userChoice = userChoiceLabel(record);
+  const personalChoice = userChoice ? `\n\n我的选择：${userChoice}` : "";
   const text = isDirect(record)
     ? `答案之书 · ${styleLabel(record.style)}\n\n我的问题：${record.question}${supplements}\n\n${answerTitle(record)}\n${answerBody(record)}${conversation}`
-    : `答案之书 · ${styleLabel(record.style)} · 遇事不决，Jev 解决\n\n我的问题：${record.question}${supplements}\n\nJev 的选择：${choice.title}\n${choice.description}\n\n${record.decision.explanation}${conversation}\n\n答案是启发，选择始终在你。`;
+    : `答案之书 · ${styleLabel(record.style)} · 遇事不决，Jev 解决\n\n我的问题：${record.question}${supplements}${personalChoice}\n\nJev 的选择：${choice.title}\n${choice.description}\n\n${record.decision.explanation}${conversation}\n\n答案是启发，选择始终在你。`;
   try {
     await navigator.clipboard.writeText(text);
     toast("答案已复制，带着它迈出下一步。");
@@ -992,6 +1046,7 @@ document.addEventListener("click", (event) => {
     toast("已删除这一条答案。");
   }
   const action = button.dataset.action;
+  if (action === "confirm-choice") state.pending?.confirmChoice?.();
   if (action === "resume-reader") openReader();
   if (action === "close-reader") {
     closeReader();
@@ -1041,6 +1096,8 @@ $(".brand").addEventListener("click", (event) => {
 $("#question-form").addEventListener("submit", askQuestion);
 $("#close-reader").addEventListener("click", closeReader);
 $("#reader-dialog").addEventListener("close", () => {
+  // 原生 Escape 关闭与关闭按钮采用相同的取消行为。
+  if (state.pending && state.busy) state.controller?.abort();
   document.body.append($("#toast"));
   updateReaderResume();
 });
@@ -1057,6 +1114,11 @@ document.addEventListener("input", (event) => {
   }
 });
 document.addEventListener("change", (event) => {
+  if (event.target.name === "user-choice" && state.pending && !state.pending.choiceConfirmed) {
+    state.pending.userChoiceId = event.target.value;
+    $("[data-action='confirm-choice']").disabled = false;
+    return;
+  }
   const scope = event.target.dataset.styleSelect;
   if (!scope || state.busy || !state.stylesReady) return;
   const style = normalizeStyle(event.target.value);

@@ -1,3 +1,22 @@
+/* 原生单选支持方向键；长候选随阅读器滚动，手机上不挤压文字。 */
+.user-choice-list { border: 0; padding: 0; margin: 20px 0; display: grid; gap: 10px; min-width: 0; }
+.user-choice-list legend { margin-bottom: 12px; font-size: 14px; }
+/* 从顶部开始滚动，避免居中布局把大量候选的开头移出可视区。 */
+.reader-dialog .reader-journey:has(.user-choice-list) { justify-content: flex-start; }
+.reader-dialog .reader-journey:has(.user-choice-list) > * { flex-shrink: 0; }
+.reader-dialog .user-choice-list { width: 100%; max-width: 720px; box-sizing: border-box; }
+.user-choice { display: flex; align-items: flex-start; gap: 12px; padding: 14px; border: 1px solid var(--reader-line); border-radius: 10px; background: var(--reader-paper); cursor: pointer; text-align: left; }
+.user-choice input { margin-top: 5px; accent-color: var(--reader-green); flex-shrink: 0; }
+.user-choice span { min-width: 0; overflow-wrap: anywhere; }
+.user-choice strong, .user-choice small { display: block; line-height: 1.7; }
+.user-choice small { color: var(--reader-muted); font-size: 13px; margin-top: 4px; }
+.user-choice:has(input:checked) { border-color: var(--reader-green); background: var(--reader-green-soft); }
+.user-choice:focus-within { outline: 2px solid var(--reader-green); outline-offset: 2px; }
+.choice-comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 18px 0; padding: 14px; border: 1px solid var(--reader-line); border-radius: 10px; }
+.choice-comparison small, .choice-comparison strong { display: block; overflow-wrap: anywhere; }
+.choice-comparison small { color: var(--reader-muted); margin-bottom: 6px; }
+.choice-comparison p { grid-column: 1 / -1; margin: 0; font-size: 13px; line-height: 1.7; }
+@media (max-width: 480px) { .choice-comparison { grid-template-columns: 1fr; } }
 /* 风格操作固定在书页上方，切换不发送请求，也不重标旧答案。 */
 .reader-dialog .reader-style-bar { flex: 0 0 auto; display: flex; align-items: flex-start; flex-wrap: wrap; gap: 8px 16px; padding: 12px 26px 0; }
 .reader-dialog .reader-style-bar .style-picker { flex: 1 1 210px; grid-template-columns: auto minmax(100px, 145px); }
