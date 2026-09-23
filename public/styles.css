@@ -126,6 +126,32 @@ button:active:not(:disabled) {
 .skip-link:focus {
   top: 10px;
 }
+/* 桌面将仓库入口放在品牌上方，颜色随全站主题变化。 */
+.repository-nav {
+  position: fixed;
+  top: 12px;
+  left: 30px;
+  z-index: 21;
+}
+.repository-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 8px;
+  border-radius: 7px;
+  color: var(--ink);
+  font-size: 12px;
+}
+.repository-link:hover {
+  color: var(--accent);
+  background: var(--surface);
+}
+.repository-link svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
 .sidebar {
   width: 236px;
   position: fixed;
@@ -134,7 +160,7 @@ button:active:not(:disabled) {
   border-right: 1px solid #e5e3da;
   display: flex;
   flex-direction: column;
-  padding: 37px 22px 24px;
+  padding: 70px 22px 24px;
   z-index: 20;
 }
 .brand {
@@ -1524,6 +1550,11 @@ main {
 }
 /* 手机隐藏固定侧栏，底部导航预留安全区，输入框字号避免 iOS 自动放大。 */
 @media (max-width: 760px) {
+  /* 手机使用正常文档流，避免入口遮挡顶部导航和主题选择。 */
+  .repository-nav {
+    position: static;
+    padding: 8px 16px 0;
+  }
   .sidebar {
     display: none;
   }
