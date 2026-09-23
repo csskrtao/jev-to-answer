@@ -65,8 +65,9 @@ export function validateOptions(options, question, status = 400, supplements = [
   if (expectedSupplements.length !== actualSupplements.length || expectedSupplements.some((item, index) => item !== actualSupplements[index])) {
     fail('补充信息已改变，请重新生成选项', status);
   }
-  if (!Array.isArray(options.choices) || options.choices.length < 2 || options.choices.length > 4) {
-    fail('需要 2 到 4 个可供选择的选项', status);
+  // 保留全部有效候选，不限制数量；至少两个选项才有比较意义。
+  if (!Array.isArray(options.choices) || options.choices.length < 2) {
+    fail('需要至少 2 个可供选择的选项', status);
   }
   const ids = new Set();
   const titles = new Set();
